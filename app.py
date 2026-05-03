@@ -289,39 +289,62 @@ with tabs[0]:
     rank["pct"] = (rank["cap_mw"] / rank["cap_mw"].sum() * 100).round(1)
     por_fuente = df_c.groupby("fuente")["capacidad_mw"].sum().reset_index().sort_values("capacidad_mw", ascending=False)
 
-    fig1 = make_subplots(rows=1, cols=2, column_widths=[0.6, 0.4],
-                         subplot_titles=["Ranking Departamental (MW)", "Mix por Fuente"])
-    fig1.add_trace(go.Bar(
-        x=rank["cap_mw"], y=rank["departamento"], orientation="h",
-        marker_color=[REGION_COLORES.get(r, C["neutral"]) for r in rank["region"]],
-        text=[f"{v:,.0f} MW" for v in rank["cap_mw"]],
-        textposition="outside", textfont=dict(size=10, color=C["subtext"]),
-        customdata=rank[["region", "proyectos", "en_constr", "inversion"]].values,
-        hovertemplate="<b>%{y}</b><br>Región: %{customdata[0]}<br>"
-                      "Capacidad: %{x:,.0f} MW<br>Activos: %{customdata[1]}<br>"
-                      "En construcción: %{customdata[2]}<br>"
-                      "Inversión: %{customdata[3]:.2f} B.COP<extra></extra>",
-        showlegend=False,
-    ), row=1, col=1)
+    col_bar, col_pie = st.columns([0.62, 0.38])
 
-    # Leyenda regiones
-    for reg, col in REGION_COLORES.items():
-        fig1.add_trace(go.Bar(x=[None], y=[None], name=reg, marker_color=col, showlegend=True), row=1, col=1)
+    # ── Gráfico de barras horizontal ──────────────────────────────────────────
+    with col_bar:
+        fig1a = go.Figure()
+        fig1a.add_trace(go.Bar(
+            x=rank["cap_mw"], y=rank["departamento"], orientation="h",
+            marker_color=[REGION_COLORES.get(r, C["neutral"]) for r in rank["region"]],
+            text=[f"{v:,.0f} MW" for v in rank["cap_mw"]],
+            textposition="outside", textfont=dict(size=10, color=C["subtext"]),
+            customdata=rank[["region", "proyectos", "en_constr", "inversion"]].values,
+            hovertemplate="<b>%{y}</b><br>Región: %{customdata[0]}<br>"
+                          "Capacidad: %{x:,.0f} MW<br>Activos: %{customdata[1]}<br>"
+                          "En construcción: %{customdata[2]}<br>"
+                          "Inversión: %{customdata[3]:.2f} B.COP<extra></extra>",
+            showlegend=False,
+        ))
+        # Leyenda de regiones como trazas dummy
+        for reg, reg_color in REGION_COLORES.items():
+            fig1a.add_trace(go.Bar(
+                x=[None], y=[None], name=reg,
+                marker_color=reg_color, showlegend=True,
+            ))
+        fig1a.update_layout(**base_layout(
+            height=460,
+            title_text=f"🏆 Ranking Departamental — {g_anio}",
+            legend=dict(x=0.55, y=0.02),
+        ))
+        fig1a.update_yaxes(categoryorder="total ascending", gridcolor=C["grid"])
+        fig1a.update_xaxes(gridcolor=C["grid"])
+        st.plotly_chart(fig1a, use_container_width=True)
 
-    fig1.add_trace(go.Pie(
-        labels=por_fuente["fuente"], values=por_fuente["capacidad_mw"], hole=0.55,
-        marker=dict(colors=[FUENTE_COLORES.get(f, C["neutral"]) for f in por_fuente["fuente"]],
-                    line=dict(color=C["bg"], width=2)),
-        textinfo="label+percent", textfont=dict(size=10),
-        hovertemplate="<b>%{label}</b><br>%{value:,.1f} MW · %{percent}<extra></extra>",
-    ), row=1, col=2)
-
-    fig1.update_layout(**base_layout(height=460, title_text=f"⚡ Energías Renovables — Colombia {g_anio}",
-                       legend=dict(x=0.01, y=0.01)))
-    fig1.update_yaxes(categoryorder="total ascending", row=1, col=1)
-    fig1.update_xaxes(gridcolor=C["grid"])
-    fig1.update_yaxes(gridcolor=C["grid"])
-    st.plotly_chart(fig1, use_container_width=True)
+    # ── Pie chart de mix por fuente ───────────────────────────────────────────
+    with col_pie:
+        fig1b = go.Figure(go.Pie(
+            labels=por_fuente["fuente"],
+            values=por_fuente["capacidad_mw"],
+            hole=0.55,
+            marker=dict(
+                colors=[FUENTE_COLORES.get(f, C["neutral"]) for f in por_fuente["fuente"]],
+                line=dict(color=C["bg"], width=2),
+            ),
+            textinfo="label+percent",
+            textfont=dict(size=10),
+            hovertemplate="<b>%{label}</b><br>%{value:,.1f} MW · %{percent}<extra></extra>",
+        ))
+        fig1b.update_layout(**base_layout(
+            height=460,
+            title_text="🔋 Mix por Fuente",
+            annotations=[dict(
+                text=f"<b>{por_fuente['capacidad_mw'].sum():,.0f}</b><br>MW",
+                x=0.5, y=0.5, font=dict(size=13, color=C["accent"]),
+                showarrow=False,
+            )],
+        ))
+        st.plotly_chart(fig1b, use_container_width=True)
 
     # Tabla de datos filtrados
     with st.expander("📋 Ver tabla de datos"):
