@@ -368,12 +368,13 @@ with tabs[1]:
         ev_deptos = st.multiselect("Filtrar por departamento",
             ["Todos"] + DEPTOS, default=["Todos"], key="ev_d")
     with e3:
-        ev_metrica = st.selectbox("Métrica", [
-            ("Capacidad (MW)", "capacidad_mw"),
-            ("Proyectos activos", "proyectos_activos"),
-            ("En construcción", "proyectos_en_construccion"),
-            ("Inversión (B.COP)", "inversion_bill_cop"),
-        ], format_func=lambda x: x[0], key="ev_m")
+        EV_METRICAS = {
+            "Capacidad (MW)":    "capacidad_mw",
+            "Proyectos activos": "proyectos_activos",
+            "En construcción":   "proyectos_en_construccion",
+            "Inversión (B.COP)": "inversion_bill_cop",
+        }
+        ev_metrica_label = st.selectbox("Métrica", list(EV_METRICAS.keys()), key="ev_m")
     with e4:
         ev_chart = st.radio("Tipo de gráfico", ["Área", "Líneas", "Barras"], horizontal=True, key="ev_c")
 
@@ -382,7 +383,8 @@ with tabs[1]:
         df_ev = df_ev[df_ev["departamento"].isin(ev_deptos)]
     if ev_fuentes:
         df_ev = df_ev[df_ev["fuente"].isin(ev_fuentes)]
-    col_m, label_m = ev_metrica
+    col_m   = EV_METRICAS[ev_metrica_label]
+    label_m = ev_metrica_label
 
     agg_ev = df_ev.groupby(["anio", "fuente"])[col_m].sum().reset_index()
     fig2 = go.Figure()
@@ -461,13 +463,15 @@ with tabs[2]:
         cc_anio_r = st.slider("Rango de años", min(ANIOS), max(ANIOS),
                               (min(ANIOS), max(ANIOS)), key="cc_a")
     with cc4:
-        cc_metrica = st.radio("Métrica", [
-            ("Consumo (GWh)", "consumo_gwh"),
-            ("Costo $/kWh", "costo_promedio_kwh"),
-            ("Usuarios", "usuarios"),
-        ], format_func=lambda x: x[0], key="cc_m")
+        CC_METRICAS = {
+            "Consumo (GWh)": "consumo_gwh",
+            "Costo $/kWh":   "costo_promedio_kwh",
+            "Usuarios":      "usuarios",
+        }
+        cc_metrica_label = st.radio("Métrica", list(CC_METRICAS.keys()), key="cc_m")
 
-    col_cc, label_cc = cc_metrica
+    col_cc   = CC_METRICAS[cc_metrica_label]
+    label_cc = cc_metrica_label
     df_cc = df_consumo[
         (df_consumo["anio"] >= cc_anio_r[0]) &
         (df_consumo["anio"] <= cc_anio_r[1]) &
