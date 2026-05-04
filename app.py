@@ -9,7 +9,8 @@ import plotly.express as px
 from plotly.subplots import make_subplots
 
 from database import (load_capacidad, load_consumo, load_emisiones,
-                      load_proyectos, load_zni)
+                      load_proyectos, load_zni,
+                      load_fncer_upme, load_proyectos_completo, CONTEXTO_2024)
 from theme import (C, FUENTE_COLORES, REGION_COLORES, SECTOR_COLORES,
                    ESTADO_COLORES, base_layout, title_html, kpi_card, divider)
 
@@ -51,10 +52,10 @@ st.markdown(f"""
 @st.cache_data(show_spinner=False)
 def cargar_todo():
     return (load_capacidad(), load_consumo(), load_emisiones(),
-            load_proyectos(), load_zni())
+            load_proyectos_completo(), load_zni(), load_fncer_upme())
 
-with st.spinner("Conectando con la base de datos..."):
-    df_cap, df_consumo, df_emis, df_proy, df_zni = cargar_todo()
+with st.spinner("Conectando con la base de datos y datos.gov.co..."):
+    df_cap, df_consumo, df_emis, df_proy, df_zni, df_fncer = cargar_todo()
 
 ANIOS    = sorted(df_cap["anio"].unique().tolist())
 REGIONES = sorted(df_cap["region"].unique().tolist())
@@ -92,8 +93,9 @@ with st.sidebar:
 
     st.markdown(f"<hr style='border-color:{C['border']};margin:10px 0;'>", unsafe_allow_html=True)
     st.caption("datos.gov.co — IPSE / UPME / IDEAM / DANE")
+    st.caption(f"FNCER UPME: {len(df_fncer):,} proyectos cargados")
     cr, cg = st.columns(2)
-    cr.metric("Registros", f"{len(df_cap)+len(df_consumo)+len(df_emis)+len(df_proy)+len(df_zni):,}")
+    cr.metric("Registros", f"{len(df_cap)+len(df_consumo)+len(df_emis)+len(df_proy)+len(df_zni)+len(df_fncer):,}")
     cg.metric("Tablas BD", "7")
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -140,6 +142,7 @@ tabs = st.tabs([
     "Proyectos ERNC",
     "Zonas ZNI",
     "Analisis Comparativo",
+    "FNCER 2024-2025",
     "Datos y Exportar",
 ])
 
@@ -1265,8 +1268,238 @@ with tabs[8]:
                 angularaxis=dict(gridcolor=C["grid"],tickfont=dict(color=C["text"])))))
         st.plotly_chart(fig_radar, use_container_width=True)
 
-# ── TAB 9: DATOS Y EXPORTAR ───────────────────────────────────────────────────
+
+# ── TAB 9: FNCER 2024-2025 ────────────────────────────────────────────────────
 with tabs[9]:
+    st.markdown(
+        f"<h2 style='color:{C['accent']};'>Proyectos FNCER — datos.gov.co (2004–2025)</h2>",
+        unsafe_allow_html=True)
+    st.markdown(
+        f"<p style='color:{C['subtext']};'>"
+        "Fuente: <b>Ministerio de Minas y Energía / UPME</b> — dataset vy9n-w6hc · "
+        "Actualización automática desde la API pública de datos.gov.co</p>",
+        unsafe_allow_html=True)
+
+    if df_fncer.empty:
+        st.warning("No se pudo cargar el dataset FNCER. Verifica la conexión a internet.")
+    else:
+        # ── KPIs contextuales 2024 ─────────────────────────────────────────
+        st.markdown(
+            f"<div style='background:{C['bg2']};border:1px solid {C['border']};"
+            f"border-left:4px solid {C['accent']};border-radius:10px;"
+            f"padding:14px 18px;margin-bottom:16px;'>"
+            f"<b style='color:{C['accent']};'>Contexto UPME 2024 — Plan 6GW+</b><br>"
+            f"<span style='color:{C['text']};font-size:12px;line-height:2;'>"
+            f"⚡ <b>{CONTEXTO_2024['total_fncer_operacion_mw']:,.0f} MW</b> FNCER en operación · "
+            f"📈 Crecimiento <b>+{CONTEXTO_2024['crecimiento_vs_2022_pct']}%</b> vs 2022 · "
+            f"🎯 Meta PND 2026: <b>{CONTEXTO_2024['meta_pnd_2026_mw']:,.0f} MW</b> "
+            f"(<b>{CONTEXTO_2024['avance_meta_pnd_pct']}%</b> alcanzado) · "
+            f"🏗️ <b>{CONTEXTO_2024['proyectos_activos_6gw']}</b> proyectos activos Plan 6GW+"
+            f"</span></div>",
+            unsafe_allow_html=True)
+
+        fk1, fk2, fk3, fk4, fk5 = st.columns(5)
+        fk1.metric("Proyectos FNCER", f"{len(df_fncer):,}")
+        fk2.metric("Capacidad Total",
+                   f"{df_fncer['capacidad_mw'].sum():,.1f} MW")
+        fk3.metric("Operativos",
+                   f"{(df_fncer['estado']=='operativo').sum():,}")
+        fk4.metric("Empleos Estimados",
+                   f"{int(df_fncer['empleos'].sum()):,}")
+        fk5.metric("Emisiones Evitadas",
+                   f"{df_fncer['emisiones_co2_ton_anio'].sum()/1e6:.2f} Mt CO₂/año")
+
+        # ── Filtros ────────────────────────────────────────────────────────
+        fn1, fn2, fn3 = st.columns(3)
+        with fn1:
+            fn_tipo = st.multiselect(
+                "Tipo de energía",
+                sorted(df_fncer["tipo_energia"].dropna().unique()),
+                default=sorted(df_fncer["tipo_energia"].dropna().unique()),
+                key="fn_tipo")
+        with fn2:
+            fn_depto = st.multiselect(
+                "Departamento",
+                ["Todos"] + sorted(df_fncer["departamento"].dropna().unique()),
+                default=["Todos"], key="fn_depto")
+        with fn3:
+            FN_ESTADOS = {"Todos los proyectos": None,
+                          "Solo operativos": "operativo",
+                          "Solo proyectados": "proyectado"}
+            fn_estado_label = st.radio(
+                "Estado", list(FN_ESTADOS.keys()),
+                horizontal=True, key="fn_est")
+
+        df_fn = df_fncer.copy()
+        if fn_tipo:
+            df_fn = df_fn[df_fn["tipo_energia"].isin(fn_tipo)]
+        if "Todos" not in fn_depto and fn_depto:
+            df_fn = df_fn[df_fn["departamento"].isin(fn_depto)]
+        if FN_ESTADOS[fn_estado_label]:
+            df_fn = df_fn[df_fn["estado"] == FN_ESTADOS[fn_estado_label]]
+
+        # ── Gráficos fila 1 ────────────────────────────────────────────────
+        fa1, fa2 = st.columns(2)
+
+        with fa1:
+            # Capacidad acumulada por año y tipo
+            df_anio = (df_fn.groupby(["anio_fpo", "tipo_energia"])["capacidad_mw"]
+                       .sum().reset_index().dropna(subset=["anio_fpo"]))
+            df_anio["anio_fpo"] = df_anio["anio_fpo"].astype(int)
+            df_anio = df_anio[df_anio["anio_fpo"].between(2010, 2026)]
+
+            fig_fn1 = go.Figure()
+            for tipo in df_anio["tipo_energia"].unique():
+                sub = df_anio[df_anio["tipo_energia"] == tipo].sort_values("anio_fpo")
+                color = FUENTE_COLORES.get(tipo, C["neutral"])
+                fig_fn1.add_trace(go.Bar(
+                    x=sub["anio_fpo"], y=sub["capacidad_mw"],
+                    name=tipo, marker_color=color,
+                    hovertemplate=f"<b>{tipo}</b><br>%{{x}}: %{{y:,.1f}} MW<extra></extra>"))
+            # Línea acumulada
+            df_acum = df_anio.groupby("anio_fpo")["capacidad_mw"].sum().cumsum().reset_index()
+            fig_fn1.add_trace(go.Scatter(
+                x=df_acum["anio_fpo"], y=df_acum["capacidad_mw"],
+                name="Acumulado", mode="lines+markers",
+                line=dict(color=C["accent"], width=2.5, dash="dot"),
+                marker=dict(size=7),
+                yaxis="y2",
+                hovertemplate="Acumulado %{x}: %{y:,.1f} MW<extra></extra>"))
+            fig_fn1.update_layout(**base_layout(
+                barmode="stack", height=380,
+                title_text="Capacidad FNCER por Año de FPO (MW)",
+                xaxis_title="Año FPO",
+                yaxis=dict(title="MW por año", gridcolor=C["grid"]),
+                yaxis2=dict(title="MW Acumulado", overlaying="y",
+                            side="right", gridcolor="rgba(0,0,0,0)",
+                            tickfont=dict(color=C["accent"])),
+            ))
+            st.plotly_chart(fig_fn1, use_container_width=True)
+
+        with fa2:
+            # Top departamentos por capacidad
+            top_depto = (df_fn.groupby(["departamento", "region"])
+                         .agg(cap=("capacidad_mw","sum"),
+                              n_proy=("proyecto","count"),
+                              empleos=("empleos","sum"))
+                         .reset_index()
+                         .sort_values("cap", ascending=False).head(15))
+            fig_fn2 = go.Figure(go.Bar(
+                x=top_depto["cap"],
+                y=top_depto["departamento"],
+                orientation="h",
+                marker_color=[REGION_COLORES.get(r, C["neutral"])
+                              for r in top_depto["region"]],
+                text=[f"{v:,.1f} MW" for v in top_depto["cap"]],
+                textposition="outside",
+                textfont=dict(size=9, color=C["subtext"]),
+                customdata=top_depto[["n_proy","empleos","region"]].values,
+                hovertemplate=(
+                    "<b>%{y}</b><br>Capacidad: %{x:,.1f} MW<br>"
+                    "Proyectos: %{customdata[0]:.0f}<br>"
+                    "Empleos: %{customdata[1]:,.0f}<br>"
+                    "Región: %{customdata[2]}<extra></extra>"),
+            ))
+            fig_fn2.update_layout(**base_layout(
+                height=380,
+                title_text="Top 15 Departamentos — Capacidad FNCER (MW)",
+                xaxis=dict(gridcolor=C["grid"],
+                           range=[0, top_depto["cap"].max()*1.25]),
+                yaxis=dict(categoryorder="total ascending",
+                           gridcolor=C["grid"], automargin=True),
+            ))
+            st.plotly_chart(fig_fn2, use_container_width=True)
+
+        # ── Gráficos fila 2 ────────────────────────────────────────────────
+        fb1, fb2 = st.columns(2)
+
+        with fb1:
+            # Pie por tipo de energía
+            pie_tipo = (df_fn.groupby("tipo_energia")["capacidad_mw"]
+                        .sum().reset_index()
+                        .sort_values("capacidad_mw", ascending=False))
+            fig_fn3 = go.Figure(go.Pie(
+                labels=pie_tipo["tipo_energia"],
+                values=pie_tipo["capacidad_mw"],
+                hole=0.52,
+                marker=dict(
+                    colors=[FUENTE_COLORES.get(t, C["neutral"])
+                            for t in pie_tipo["tipo_energia"]],
+                    line=dict(color=C["bg"], width=2)),
+                textinfo="label+percent",
+                textfont=dict(size=10),
+                hovertemplate="<b>%{label}</b><br>%{value:,.1f} MW · %{percent}<extra></extra>",
+            ))
+            fig_fn3.update_layout(**base_layout(
+                height=320, title_text="Mix FNCER por Tipo (MW)",
+                annotations=[dict(text=f"<b>{pie_tipo['capacidad_mw'].sum():,.0f}</b><br>MW",
+                    x=0.5, y=0.5, font=dict(size=12, color=C["accent"]), showarrow=False)],
+            ))
+            st.plotly_chart(fig_fn3, use_container_width=True)
+
+        with fb2:
+            # Proyectos destacados 2024 — UPME Plan 6GW+
+            st.markdown(
+                f"<b style='color:{C['accent2']};'>Proyectos Destacados 2024 — Plan 6GW+ UPME</b>",
+                unsafe_allow_html=True)
+            for p in CONTEXTO_2024["proyectos_destacados_2024"]:
+                color = FUENTE_COLORES.get(p["tipo"], C["neutral"])
+                st.markdown(f"""
+                <div style="background:{C['bg2']};border:1px solid {C['border']};
+                            border-left:3px solid {color};border-radius:8px;
+                            padding:10px 14px;margin:5px 0;display:flex;
+                            align-items:center;justify-content:space-between;">
+                  <div>
+                    <b style="color:{C['text']};font-size:12px;">{p['nombre']}</b><br>
+                    <span style="color:{C['subtext']};font-size:11px;">
+                      {p['depto']} · {p['municipio']} · {p['tipo']}
+                    </span>
+                  </div>
+                  <div style="text-align:right;">
+                    <b style="color:{color};font-size:16px;">{p['mw']} MW</b>
+                  </div>
+                </div>""", unsafe_allow_html=True)
+            st.markdown(
+                f"<p style='color:{C['subtext']};font-size:10px;margin-top:8px;'>"
+                f"Fuente: {CONTEXTO_2024['fuente']}</p>",
+                unsafe_allow_html=True)
+
+        # ── Emisiones evitadas por depto ───────────────────────────────────
+        em_depto = (df_fn.groupby("departamento")["emisiones_co2_ton_anio"]
+                    .sum().reset_index()
+                    .sort_values("emisiones_co2_ton_anio", ascending=False).head(12))
+        fig_fn4 = go.Figure(go.Bar(
+            x=em_depto["departamento"],
+            y=em_depto["emisiones_co2_ton_anio"] / 1000,
+            marker=dict(
+                color=em_depto["emisiones_co2_ton_anio"],
+                colorscale=[[0, C["bg2"]], [0.5, C["biomasa"]], [1, C["green"]]],
+                showscale=False),
+            text=[f"{v/1000:,.0f}k" for v in em_depto["emisiones_co2_ton_anio"]],
+            textposition="outside",
+            hovertemplate="<b>%{x}</b><br>%{y:,.1f} miles Ton CO₂/año evitadas<extra></extra>",
+        ))
+        fig_fn4.update_layout(**base_layout(
+            height=300,
+            title_text="Emisiones CO₂ Evitadas por los Proyectos FNCER (miles Ton/año)",
+            xaxis_tickangle=-35, yaxis_title="Miles Ton CO₂/año",
+        ))
+        st.plotly_chart(fig_fn4, use_container_width=True)
+
+        # ── Tabla de proyectos ─────────────────────────────────────────────
+        with st.expander(f"📋 Ver tabla completa ({len(df_fn):,} proyectos)"):
+            cols_show = ["proyecto","tipo_energia","capacidad_mw","departamento",
+                         "municipio","fecha_fpo","empleos",
+                         "inversion_musd","emisiones_co2_ton_anio","estado"]
+            cols_ok = [c for c in cols_show if c in df_fn.columns]
+            st.dataframe(
+                df_fn[cols_ok].sort_values("capacidad_mw", ascending=False)
+                .rename(columns={c: c.replace("_"," ").title() for c in cols_ok}),
+                use_container_width=True, hide_index=True)
+
+
+# ── TAB 10: DATOS Y EXPORTAR ───────────────────────────────────────────────────
+with tabs[10]:
     st.markdown(f"<h2 style='color:{C['accent']};'>Explorador de Datos y Exportacion</h2>", unsafe_allow_html=True)
     datasets = {
         "Capacidad Instalada": df_cap,
@@ -1326,14 +1559,30 @@ with tabs[9]:
 
 # ── FOOTER ────────────────────────────────────────────────────────────────────
 st.markdown(f"""
-<div style="margin-top:24px;padding:14px 22px;background:linear-gradient(135deg,{C['bg3']},{C['bg2']});
-            border-radius:10px;border-top:2px solid {C['border']};
-            display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
-  <div style="color:{C['subtext']};font-size:11px;">
-    datos.gov.co — IPSE / UPME / IDEAM / DANE  |  Python / MySQL / Streamlit / Plotly
-  </div>
-  <div style="color:{C['subtext']};font-size:11px;">
-    Bootcamp Talento Tech — Analisis de Datos — Nivel Integrador 2025
+<div style="margin-top:24px;padding:16px 22px;background:linear-gradient(135deg,{C['bg3']},{C['bg2']});
+            border-radius:10px;border-top:2px solid {C['border']};">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;">
+    <div>
+      <div style="color:{C['accent']};font-size:11px;font-weight:bold;letter-spacing:1px;margin-bottom:6px;">
+        FUENTES DE DATOS OFICIALES — datos.gov.co
+      </div>
+      <div style="color:{C['subtext']};font-size:10px;line-height:1.8;">
+        📡 <b style="color:{C['text']}">UPME — Meta FNCER</b> (vy9n-w6hc): proyectos FNCER 2004-2025 · capacidad, inversión, empleos, emisiones CO₂<br>
+        📡 <b style="color:{C['text']}">UPME — Balance Energético</b>: consumo sectorial GWh por departamento y trimestre<br>
+        📡 <b style="color:{C['text']}">IPSE</b>: cobertura eléctrica Zonas No Interconectadas (ZNI)<br>
+        📡 <b style="color:{C['text']}">IDEAM</b>: Inventario Nacional de GEI — emisiones CO₂ por sector 2019-2023<br>
+        📡 <b style="color:{C['text']}">DANE — DIVIPOLA</b>: división político-administrativa Colombia
+      </div>
+    </div>
+    <div style="text-align:right;">
+      <div style="color:{C['subtext']};font-size:10px;line-height:1.8;">
+        🛠️ Python · MySQL · Streamlit · Plotly<br>
+        🎓 Bootcamp Talento Tech — Nivel Integrador 2025<br>
+        📊 Plan 6GW+ UPME: {CONTEXTO_2024['total_fncer_operacion_mw']:,.0f} MW FNCER en operación (2024)<br>
+        🌐 <a href="https://dashboard-energia-dqn2cld55x2mawyjlgqund.streamlit.app/" style="color:{C['accent']};">Ver Dashboard</a>
+        · <a href="https://github.com/eliasibjuliogarcia/dashboard-energia" style="color:{C['accent']};">GitHub</a>
+      </div>
+    </div>
   </div>
 </div>
 """, unsafe_allow_html=True)
