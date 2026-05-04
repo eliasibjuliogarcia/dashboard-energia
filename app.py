@@ -353,168 +353,232 @@ with tabs[1]:
     col_mapa, col_inv = st.columns([1.1, 0.9])
 
     with col_mapa:
-        # Coordenadas aproximadas de capitales de departamentos colombianos
-        COORDS = {
-            "Antioquia":           (6.2518,  -75.5636),
-            "Atlantico":           (10.9685, -74.7813),
-            "Bogota D.C.":         (4.7110,  -74.0721),
-            "Bolivar":             (8.6462,  -74.0346),
-            "Boyaca":              (5.5353,  -73.3678),
-            "Caldas":              (5.0703,  -75.5138),
-            "Caqueta":             (1.6144,  -75.6062),
-            "Cauca":               (2.4448,  -76.6147),
-            "Cesar":               (10.4631, -73.2532),
-            "Choco":               (5.6919,  -76.6583),
-            "Cordoba":             (8.7479,  -75.8814),
-            "Cundinamarca":        (4.9987,  -74.0041),
-            "Huila":               (2.5359,  -75.5277),
-            "La Guajira":          (11.5444, -72.9072),
-            "Magdalena":           (10.4113, -74.4057),
-            "Meta":                (4.1533,  -73.6350),
-            "Narino":              (1.2136,  -77.2811),
-            "Norte de Santander":  (7.8939,  -72.5078),
-            "Quindio":             (4.4610,  -75.6674),
-            "Risaralda":           (4.8133,  -75.6961),
-            "Santander":           (7.1193,  -73.1227),
-            "Sucre":               (8.8112,  -74.7233),
-            "Tolima":              (4.4389,  -75.2322),
-            "Valle del Cauca":     (3.8010,  -76.6413),
-            "Casanare":            (5.3389,  -72.3947),
-            "Amazonas":            (-1.4436, -71.5724),
-            "Guainia":             (2.5854,  -68.5247),
-            "Guaviare":            (2.0836,  -72.6406),
-            "Vaupes":              (0.8554,  -70.8119),
-            "Vichada":             (4.4236,  -69.2879),
-        }
+        # ── Mapa coroplético real de Colombia ─────────────────────────────────
+        # GeoJSON oficial DANE — departamentos (caticoa3/colombia_mapa @ GitHub)
+        GEOJSON_URL = (
+            "https://raw.githubusercontent.com/caticoa3/colombia_mapa"
+            "/master/co_2018_MGN_DPTO_POLITICO.geojson"
+        )
 
-        # Construir dataframe del mapa
-        df_mapa = (df_cap[
-                       (df_cap["anio"] == g_anio) &
-                       (df_cap["tipo"].isin(["renovable","alternativa"]))
-                   ]
-                   .groupby("departamento")["capacidad_mw"]
-                   .sum()
-                   .reset_index())
-        df_mapa["lat"] = df_mapa["departamento"].map(
-            lambda d: COORDS.get(d, (4.5, -74.0))[0])
-        df_mapa["lon"] = df_mapa["departamento"].map(
-            lambda d: COORDS.get(d, (4.5, -74.0))[1])
-        df_mapa["size"] = (df_mapa["capacidad_mw"] / df_mapa["capacidad_mw"].max() * 50 + 5).fillna(5)
+        @st.cache_data(show_spinner=False, ttl=86400)
+        def cargar_geojson(url):
+            import requests, json
+            r = requests.get(url, timeout=15)
+            r.raise_for_status()
+            return r.json()
 
-        # Proyectos del pipeline
-        df_proy_mapa = (df_proy
-                        .groupby("departamento")
-                        .agg(n_proy=("nombre_proyecto","count"),
-                             inv=("inversion_musd","sum"))
-                        .reset_index())
-        df_mapa = df_mapa.merge(df_proy_mapa, on="departamento", how="left").fillna(0)
+        try:
+            geojson_col = cargar_geojson(GEOJSON_URL)
 
-        fig_mapa = go.Figure()
+            # Normalizar nombres del GeoJSON para hacer match con la BD
+            # El campo es properties.DPTO_CNMBR (mayúsculas, sin tildes)
+            NOMBRE_MAP = {
+                "ANTIOQUIA": "Antioquia", "ATLANTICO": "Atlantico",
+                "BOGOTA": "Bogota D.C.", "BOLIVAR": "Bolivar",
+                "BOYACA": "Boyaca", "CALDAS": "Caldas",
+                "CAQUETA": "Caqueta", "CAUCA": "Cauca",
+                "CESAR": "Cesar", "CHOCO": "Choco",
+                "CORDOBA": "Cordoba", "CUNDINAMARCA": "Cundinamarca",
+                "HUILA": "Huila", "LA GUAJIRA": "La Guajira",
+                "MAGDALENA": "Magdalena", "META": "Meta",
+                "NARINO": "Narino", "NORTE DE SANTANDER": "Norte de Santander",
+                "QUINDIO": "Quindio", "RISARALDA": "Risaralda",
+                "SANTANDER": "Santander", "SUCRE": "Sucre",
+                "TOLIMA": "Tolima", "VALLE DEL CAUCA": "Valle del Cauca",
+                "CASANARE": "Casanare", "AMAZONAS": "Amazonas",
+                "GUAINIA": "Guainia", "GUAVIARE": "Guaviare",
+                "VAUPES": "Vaupes", "VICHADA": "Vichada",
+                "ARAUCA": "Arauca", "PUTUMAYO": "Putumayo",
+                "SAN ANDRES": "San Andres",
+            }
+            # Agregar campo normalizado al GeoJSON
+            for feat in geojson_col["features"]:
+                raw = feat["properties"].get("DPTO_CNMBR", "")
+                feat["properties"]["nombre_bd"] = NOMBRE_MAP.get(
+                    raw.upper().replace("Á","A").replace("Ó","O")
+                    .replace("É","E").replace("Í","I").replace("Ú","U"), raw.title()
+                )
 
-        # Burbujas de capacidad instalada
-        fig_mapa.add_trace(go.Scattergeo(
-            lat=df_mapa["lat"],
-            lon=df_mapa["lon"],
-            mode="markers+text",
-            marker=dict(
-                size=df_mapa["size"],
-                color=df_mapa["capacidad_mw"],
-                colorscale=[[0, C["bg2"]], [0.3, C["eolica"]],
-                            [0.7, C["solar"]], [1, C["green"]]],
-                showscale=True,
+            # Capacidad renovable por departamento (año global)
+            df_mapa = (
+                df_cap[
+                    (df_cap["anio"] == g_anio) &
+                    (df_cap["tipo"].isin(["renovable","alternativa"]))
+                ]
+                .groupby("departamento")["capacidad_mw"]
+                .sum()
+                .reset_index(name="cap_mw")
+            )
+            # Proyectos y empleos
+            proy_d = (df_proy.groupby("departamento")
+                      .agg(n_proy=("nombre_proyecto","count"),
+                           inv=("inversion_musd","sum"),
+                           emp=("empleos_generados","sum"))
+                      .reset_index())
+            df_mapa = df_mapa.merge(proy_d, on="departamento", how="left").fillna(0)
+
+            # Texto hover personalizado
+            df_mapa["hover"] = df_mapa.apply(
+                lambda r: (
+                    f"<b>{r['departamento']}</b><br>"
+                    f"Capacidad renovable: {r['cap_mw']:,.0f} MW<br>"
+                    f"Proyectos ERNC: {int(r['n_proy'])}<br>"
+                    f"Inversion: USD {r['inv']:,.0f}M<br>"
+                    f"Empleos: {int(r['emp']):,}"
+                ), axis=1
+            )
+
+            fig_mapa = go.Figure(go.Choropleth(
+                geojson=geojson_col,
+                locations=df_mapa["departamento"],
+                featureidkey="properties.nombre_bd",
+                z=df_mapa["cap_mw"],
+                colorscale=[
+                    [0.0,  "#0A1628"],
+                    [0.15, "#0F2A5A"],
+                    [0.35, "#1B3A5C"],
+                    [0.55, "#1D9E75"],
+                    [0.75, "#FFB700"],
+                    [1.0,  "#00C896"],
+                ],
+                zmin=0,
+                zmax=df_mapa["cap_mw"].max(),
+                marker=dict(
+                    line=dict(color="#E8EDF2", width=0.6),
+                    opacity=0.92,
+                ),
                 colorbar=dict(
-                    title="MW Renovable",
+                    title=dict(text="MW Renovable", font=dict(color=C["text"], size=11)),
                     tickfont=dict(color=C["text"], size=10),
                     bgcolor=C["bg2"],
                     bordercolor=C["border"],
+                    thickness=14,
+                    len=0.75,
                     x=1.02,
                 ),
-                line=dict(color=C["bg"], width=1),
-                opacity=0.85,
-            ),
-            text=df_mapa["departamento"],
-            textposition="top center",
-            textfont=dict(size=8, color=C["text"]),
-            customdata=df_mapa[["capacidad_mw","n_proy","inv"]].values,
-            hovertemplate=(
-                "<b>%{text}</b><br>"
-                "Capacidad: %{customdata[0]:,.0f} MW<br>"
-                "Proyectos ERNC: %{customdata[1]:.0f}<br>"
-                "Inversion: USD %{customdata[2]:,.0f}M<extra></extra>"
-            ),
-            name="Capacidad renovable",
-        ))
+                text=df_mapa["hover"],
+                hovertemplate="%{text}<extra></extra>",
+                name="",
+            ))
 
-        # Marcadores especiales para proyectos Mision Transmision
-        mision_pts = [
-            (11.5444, -72.9072, "La Guajira — Hub Eolico/Solar", "★ 850 MW eolica + 498 MW solar"),
-            (10.9685, -74.7813, "Atlantico — Solar Caribe",       "★ 280 MW solar en operacion"),
-            (2.4448,  -76.6147, "Cauca — Hidroelectrica",          "★ 1.100 MW instalados"),
-            (6.2518,  -75.5636, "Antioquia — Ituango",             "★ 2.400 MW en construccion"),
-            (4.4389,  -75.2322, "Tolima — Solar Central",          "★ 196 MW operativo"),
-        ]
-        fig_mapa.add_trace(go.Scattergeo(
-            lat=[p[0] for p in mision_pts],
-            lon=[p[1] for p in mision_pts],
-            mode="markers",
-            marker=dict(
-                size=16, symbol="star",
-                color=C["solar"],
-                line=dict(color="white", width=1),
-            ),
-            text=[p[2] for p in mision_pts],
-            customdata=[[p[3]] for p in mision_pts],
-            hovertemplate="<b>%{text}</b><br>%{customdata[0]}<extra></extra>",
-            name="Mision Transmision ★",
-        ))
+            # Estrellas Mision Transmision
+            MISION = [
+                (11.54, -72.91, "La Guajira", "Hub Eolico/Solar 850+498 MW"),
+                (6.25,  -75.56, "Antioquia",  "Ituango 2.400 MW en construccion"),
+                (4.44,  -75.23, "Tolima",     "Solar Central 196 MW operativo"),
+                (10.97, -74.78, "Atlantico",  "Solar Caribe 280 MW operativo"),
+                (2.44,  -76.61, "Cauca",      "Hidroelectrica 1.100 MW"),
+            ]
+            fig_mapa.add_trace(go.Scattergeo(
+                lat=[p[0] for p in MISION],
+                lon=[p[1] for p in MISION],
+                mode="markers+text",
+                marker=dict(
+                    symbol="star", size=14,
+                    color=C["solar"],
+                    line=dict(color="white", width=1),
+                ),
+                text=["★"]*len(MISION),
+                textfont=dict(size=9, color="white"),
+                customdata=[[p[2], p[3]] for p in MISION],
+                hovertemplate=(
+                    "<b>%{customdata[0]}</b><br>"
+                    "Mision Transmision:<br>%{customdata[1]}"
+                    "<extra></extra>"
+                ),
+                name="Mision Transmision ★",
+                showlegend=True,
+            ))
 
-        fig_mapa.update_layout(
-            height=480,
-            paper_bgcolor=C["bg"],
-            plot_bgcolor=C["bg"],
-            font=dict(family="Georgia, serif", color=C["text"], size=11),
-            title=dict(
-                text="Capacidad Renovable Instalada por Departamento",
-                font=dict(size=14, color=C["accent"], family="Georgia, serif"),
-                x=0.01,
-            ),
-            geo=dict(
-                scope="south america",
-                center=dict(lat=4.5, lon=-74.5),
-                projection_scale=5.5,
-                showland=True,
-                landcolor="#1a2744",
-                showocean=True,
-                oceancolor="#0a1628",
-                showcountries=True,
-                countrycolor="#2D3250",
-                showlakes=False,
-                bgcolor=C["bg"],
-                resolution=50,
-                lataxis=dict(range=[-5, 15]),
-                lonaxis=dict(range=[-82, -65]),
-            ),
-            legend=dict(
-                x=0.01, y=0.99,
-                bgcolor="rgba(13,27,42,0.85)",
-                bordercolor=C["border"],
-                borderwidth=1,
-                font=dict(size=10),
-            ),
-            hoverlabel=dict(
-                bgcolor=C["bg3"], bordercolor=C["accent"],
-                font=dict(color=C["text"], size=12),
-            ),
-            margin=dict(l=0, r=0, t=50, b=0),
-        )
-        st.plotly_chart(fig_mapa, use_container_width=True)
+            fig_mapa.update_layout(
+                height=500,
+                paper_bgcolor=C["bg"],
+                plot_bgcolor=C["bg"],
+                font=dict(family="Georgia, serif", color=C["text"], size=11),
+                title=dict(
+                    text=f"🗺️ Capacidad Renovable por Departamento — Colombia {g_anio}",
+                    font=dict(size=13, color=C["accent"], family="Georgia, serif"),
+                    x=0.01,
+                ),
+                geo=dict(
+                    fitbounds="locations",
+                    visible=False,
+                    bgcolor=C["bg"],
+                    showframe=False,
+                    showcoastlines=False,
+                ),
+                legend=dict(
+                    x=0.01, y=0.01,
+                    bgcolor="rgba(13,27,42,0.85)",
+                    bordercolor=C["border"],
+                    borderwidth=1,
+                    font=dict(size=10),
+                ),
+                hoverlabel=dict(
+                    bgcolor=C["bg3"],
+                    bordercolor=C["accent"],
+                    font=dict(color=C["text"], size=12),
+                ),
+                margin=dict(l=0, r=10, t=50, b=0),
+            )
+            st.plotly_chart(fig_mapa, use_container_width=True)
 
-        st.markdown(
-            f"<p style='color:{C['subtext']};font-size:11px;'>"
-            "★ Proyectos prioritarios Mision Transmision UPME · "
-            "Tamaño = Capacidad instalada · Color = MW renovables</p>",
-            unsafe_allow_html=True,
-        )
+            # Leyenda de escala de color
+            st.markdown(
+                f"<p style='color:{C['subtext']};font-size:11px;margin-top:-8px;'>"
+                f"Escurecido = menor capacidad  |  "
+                f"Amarillo/verde = mayor capacidad  |  "
+                f"★ = Nodos prioritarios Mision Transmision UPME  |  "
+                f"Fuente GeoJSON: DANE via caticoa3/colombia_mapa</p>",
+                unsafe_allow_html=True,
+            )
+
+        except Exception as e:
+            # Fallback: mapa de burbujas si falla la carga del GeoJSON
+            st.warning(
+                f"No se pudo cargar el GeoJSON ({e}). "
+                "Mostrando mapa de burbujas alternativo."
+            )
+            COORDS = {
+                "Antioquia":(6.25,-75.56),"Atlantico":(10.97,-74.78),
+                "Bogota D.C.":(4.71,-74.07),"Bolivar":(8.65,-74.03),
+                "Boyaca":(5.54,-73.37),"Caldas":(5.07,-75.51),
+                "Caqueta":(1.61,-75.61),"Cauca":(2.44,-76.61),
+                "Cesar":(10.46,-73.25),"Choco":(5.69,-76.66),
+                "Cordoba":(8.75,-75.88),"Cundinamarca":(5.0,-74.0),
+                "Huila":(2.54,-75.53),"La Guajira":(11.54,-72.91),
+                "Magdalena":(10.41,-74.41),"Meta":(4.15,-73.64),
+                "Narino":(1.21,-77.28),"Norte de Santander":(7.89,-72.51),
+                "Quindio":(4.46,-75.67),"Risaralda":(4.81,-75.7),
+                "Santander":(7.12,-73.12),"Sucre":(8.81,-74.72),
+                "Tolima":(4.44,-75.23),"Valle del Cauca":(3.8,-76.64),
+                "Casanare":(5.34,-72.39),"Amazonas":(-1.44,-71.57),
+                "Guainia":(2.59,-68.52),"Guaviare":(2.08,-72.64),
+                "Vaupes":(0.86,-70.81),"Vichada":(4.42,-69.29),
+            }
+            df_b = (
+                df_cap[(df_cap["anio"]==g_anio)&(df_cap["tipo"].isin(["renovable","alternativa"]))]
+                .groupby("departamento")["capacidad_mw"].sum().reset_index()
+            )
+            df_b["lat"] = df_b["departamento"].map(lambda d: COORDS.get(d,(4.5,-74))[0])
+            df_b["lon"] = df_b["departamento"].map(lambda d: COORDS.get(d,(4.5,-74))[1])
+            df_b["sz"] = (df_b["capacidad_mw"]/df_b["capacidad_mw"].max()*50+5).fillna(5)
+            fig_b = go.Figure(go.Scattergeo(
+                lat=df_b["lat"], lon=df_b["lon"], mode="markers",
+                marker=dict(size=df_b["sz"],color=df_b["capacidad_mw"],
+                    colorscale=[[0,C["bg2"]],[0.5,C["eolica"]],[1,C["green"]]],
+                    showscale=True),
+                text=df_b["departamento"],
+                hovertemplate="<b>%{text}</b><br>%{marker.color:,.0f} MW<extra></extra>",
+            ))
+            fig_b.update_layout(height=480,paper_bgcolor=C["bg"],
+                geo=dict(scope="south america",center=dict(lat=4.5,lon=-74.5),
+                    projection_scale=5.5,showland=True,landcolor="#1a2744",
+                    showocean=True,oceancolor="#0a1628",showcountries=True,
+                    countrycolor="#2D3250",bgcolor=C["bg"],
+                    lataxis=dict(range=[-5,15]),lonaxis=dict(range=[-82,-65])),
+                margin=dict(l=0,r=0,t=40,b=0))
+            st.plotly_chart(fig_b, use_container_width=True)
 
     with col_inv:
         # Inversión apilada por región y fuente
