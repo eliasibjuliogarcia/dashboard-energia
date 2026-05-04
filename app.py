@@ -469,7 +469,15 @@ with tabs[1]:
         ))
 
         fig_mapa.update_layout(
-            **base_layout(height=480, title_text="Capacidad Renovable Instalada por Departamento"),
+            height=480,
+            paper_bgcolor=C["bg"],
+            plot_bgcolor=C["bg"],
+            font=dict(family="Georgia, serif", color=C["text"], size=11),
+            title=dict(
+                text="Capacidad Renovable Instalada por Departamento",
+                font=dict(size=14, color=C["accent"], family="Georgia, serif"),
+                x=0.01,
+            ),
             geo=dict(
                 scope="south america",
                 center=dict(lat=4.5, lon=-74.5),
@@ -486,8 +494,17 @@ with tabs[1]:
                 lataxis=dict(range=[-5, 15]),
                 lonaxis=dict(range=[-82, -65]),
             ),
-            legend=dict(x=0.01, y=0.99, bgcolor="rgba(13,27,42,0.85)",
-                        bordercolor=C["border"], borderwidth=1),
+            legend=dict(
+                x=0.01, y=0.99,
+                bgcolor="rgba(13,27,42,0.85)",
+                bordercolor=C["border"],
+                borderwidth=1,
+                font=dict(size=10),
+            ),
+            hoverlabel=dict(
+                bgcolor=C["bg3"], bordercolor=C["accent"],
+                font=dict(color=C["text"], size=12),
+            ),
             margin=dict(l=0, r=0, t=50, b=0),
         )
         st.plotly_chart(fig_mapa, use_container_width=True)
