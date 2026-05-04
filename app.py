@@ -311,11 +311,12 @@ with tabs[1]:
                 showlegend=False,
                 name="",
             ))
-            # Traces dummy para la leyenda de regiones
+            # Traces dummy para la leyenda (Scatter invisible, no interfiere con ejes)
             for reg, rc in REGION_COLORES.items():
-                fig_bar.add_trace(go.Bar(
-                    x=[None], y=[None],
-                    name=reg, marker_color=rc, showlegend=True))
+                fig_bar.add_trace(go.Scatter(
+                    x=[None], y=[None], mode="markers",
+                    marker=dict(color=rc, size=10, symbol="square"),
+                    name=reg, showlegend=True))
 
             max_val = rank["cap_mw"].max() if not rank.empty else 1
             fig_bar.update_layout(
@@ -1158,50 +1159,59 @@ with tabs[8]:
                .fillna(0)
                .sort_values("pct", ascending=False))
 
-        fig_an1 = go.Figure(go.Bar(
-            x=idx["departamento"],
-            y=idx["pct"],
+        # ── Gráfico: MW renovables absolutos por depto (más honesto que %)
+        # porque la BD no tiene datos no-renovables para todos los deptos
+        idx_mw = idx.sort_values("mw_renov", ascending=False)
+        region_depto = (cap_23.drop_duplicates("departamento")
+                        .set_index("departamento")["region"].to_dict())
+        idx_mw["region"] = idx_mw["departamento"].map(
+            lambda d: region_depto.get(d, "Otra"))
+
+        fig_an1 = go.Figure()
+        fig_an1.add_trace(go.Bar(
+            x=idx_mw["departamento"],
+            y=idx_mw["mw_renov"],
             marker=dict(
-                color=idx["pct"],
-                colorscale=[[0,C["red"]],[0.4,C["solar"]],[0.75,C["hidro"]],[1,C["green"]]],
-                showscale=True,
-                colorbar=dict(
-                    title=dict(text="% Renov.", font=dict(color=C["text"], size=10)),
-                    tickfont=dict(color=C["text"], size=9),
-                    thickness=12, len=0.6,
-                ),
+                color=[REGION_COLORES.get(r, C["neutral"])
+                       for r in idx_mw["region"]],
+                line=dict(color=C["bg"], width=0.5),
             ),
-            text=[f"{v:.0f}%" for v in idx["pct"]],
+            text=[f"{v:,.0f} MW" for v in idx_mw["mw_renov"]],
             textposition="outside",
-            customdata=idx[["mw_renov","mw_total","empleos_generados","inversion_musd"]].values,
+            textfont=dict(size=8, color=C["subtext"]),
+            customdata=idx_mw[["mw_total","pct","empleos_generados","inversion_musd"]].values,
             hovertemplate=(
                 "<b>%{x}</b><br>"
-                "% Renovable: %{y:.1f}%<br>"
-                "MW Renovables: %{customdata[0]:,.0f} MW<br>"
-                "MW Totales: %{customdata[1]:,.0f} MW<br>"
+                "MW Renovables: %{y:,.0f} MW<br>"
+                "MW Totales depto: %{customdata[0]:,.0f} MW<br>"
+                "% Renovable matriz: %{customdata[1]:.1f}%<br>"
                 "Empleos ERNC: %{customdata[2]:,.0f}<br>"
                 "Inversion: USD %{customdata[3]:,.0f}M"
                 "<extra></extra>"
             ),
+            name="MW Renovable",
+            showlegend=False,
         ))
+        # Leyenda de regiones con Scatter (no interfiere con ejes)
+        for reg, rc in REGION_COLORES.items():
+            fig_an1.add_trace(go.Scatter(
+                x=[None], y=[None], mode="markers",
+                marker=dict(color=rc, size=10, symbol="square"),
+                name=reg, showlegend=True))
+
         fig_an1.update_layout(**base_layout(
             height=400,
-            title_text=(
-                f"% Renovable en la Matriz de cada Departamento ({g_anio})<br>"
-                f"<sup style='font-size:11px;'>"
-                f"(MW renovables / MW totales del depto — incluye gas, carbon, diesel)</sup>"
-            ),
+            title_text=f"Capacidad Renovable Instalada por Departamento — {g_anio} (MW)",
             xaxis_tickangle=-40,
-            yaxis=dict(title="% Renovable", range=[0, 115], gridcolor=C["grid"]),
+            xaxis=dict(gridcolor=C["grid"]),
+            yaxis=dict(title="MW Renovables", gridcolor=C["grid"]),
+            legend=dict(x=0.75, y=0.98),
         ))
         st.plotly_chart(fig_an1, use_container_width=True)
-
-        # Nota explicativa
         st.markdown(
             f"<p style='color:{C['subtext']};font-size:11px;margin-top:-14px;'>"
-            "100% = el departamento solo tiene fuentes renovables registradas en la BD. "
-            "Los deptos con gas, carbon o diesel muestran valores menores. "
-            "Choco y Casanare tienen combustible/gas en su mix, por eso <100%.</p>",
+            f"Hover sobre cada barra para ver % renovable en la matriz de cada depto. "
+            f"Color = región natural. Fuente: UPME / datos.gov.co</p>",
             unsafe_allow_html=True,
         )
 
