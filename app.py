@@ -317,14 +317,18 @@ with tabs[1]:
                     x=[None], y=[None],
                     name=reg, marker_color=rc, showlegend=True))
 
+            max_val = rank["cap_mw"].max() if not rank.empty else 1
             fig_bar.update_layout(
                 **base_layout(
                     height=440,
                     title_text=f"Top {top_n} Departamentos — {cap_orden}",
                     legend=dict(x=0.55, y=0.02),
-                    xaxis=dict(gridcolor=C["grid"], range=[0, rank["cap_mw"].max()*1.25]),
-                    yaxis=dict(categoryorder="total ascending", gridcolor=C["grid"]),
-                    barmode="overlay",
+                    xaxis=dict(gridcolor=C["grid"], range=[0, max_val * 1.3]),
+                    yaxis=dict(
+                        categoryorder="total ascending",
+                        gridcolor=C["grid"],
+                        automargin=True,
+                    ),
                 )
             )
             st.plotly_chart(fig_bar, use_container_width=True)
@@ -1122,24 +1126,84 @@ with tabs[8]:
 
     col_an1,col_an2 = st.columns(2)
     with col_an1:
-        cap_23 = df_cap[df_cap["anio"]==g_anio]
-        renov = cap_23[cap_23["tipo"].isin(["renovable","alternativa"])].groupby("departamento")["capacidad_mw"].sum()
-        total = cap_23.groupby("departamento")["capacidad_mw"].sum()
-        pct_df = (renov/total*100).fillna(0).reset_index(name="pct")
-        emp_d = df_proy.groupby("departamento")["empleos_generados"].sum().reset_index()
+        cap_23 = df_cap[df_cap["anio"] == g_anio]
+
+        # MW renovables por departamento
+        renov_dep = (cap_23[cap_23["tipo"].isin(["renovable","alternativa"])]
+                     .groupby("departamento")["capacidad_mw"].sum())
+
+        # Total MW (renovable + no renovable) por departamento
+        total_dep = cap_23.groupby("departamento")["capacidad_mw"].sum()
+
+        # % renovable = MW_renov_depto / MW_total_depto * 100
+        # Esto mide cuán "renovable" es la matriz de cada depto
+        pct_series = (renov_dep / total_dep * 100).fillna(0).round(1)
+        pct_df = pct_series.reset_index()
+        pct_df.columns = ["departamento", "pct"]
+
+        # Añadir MW absolutos para mejor hover
+        pct_df = pct_df.merge(
+            renov_dep.reset_index().rename(columns={"capacidad_mw":"mw_renov"}),
+            on="departamento", how="left"
+        ).merge(
+            total_dep.reset_index().rename(columns={"capacidad_mw":"mw_total"}),
+            on="departamento", how="left"
+        ).fillna(0)
+
+        emp_d  = df_proy.groupby("departamento")["empleos_generados"].sum().reset_index()
         inv_d2 = df_proy.groupby("departamento")["inversion_musd"].sum().reset_index()
-        idx = pct_df.merge(emp_d,on="departamento",how="left").merge(inv_d2,on="departamento",how="left").fillna(0)
-        idx = idx.sort_values("pct",ascending=False)
+        idx = (pct_df
+               .merge(emp_d,  on="departamento", how="left")
+               .merge(inv_d2, on="departamento", how="left")
+               .fillna(0)
+               .sort_values("pct", ascending=False))
+
         fig_an1 = go.Figure(go.Bar(
-            x=idx["departamento"],y=idx["pct"],
-            marker=dict(color=idx["pct"],colorscale=[[0,C["red"]],[0.5,C["solar"]],[1,C["green"]]],
-                showscale=True,colorbar=dict(title="%",tickfont=dict(color=C["text"]))),
-            text=[f"{v:.0f}%" for v in idx["pct"]],textposition="outside",
-            hovertemplate="<b>%{x}</b><br>%{y:.1f}% renovable<extra></extra>"))
-        fig_an1.update_layout(**base_layout(height=380,
-            title_text=f"% Capacidad Renovable por Departamento ({g_anio})",
-            xaxis_tickangle=-40,yaxis_title="% Renovable"))
+            x=idx["departamento"],
+            y=idx["pct"],
+            marker=dict(
+                color=idx["pct"],
+                colorscale=[[0,C["red"]],[0.4,C["solar"]],[0.75,C["hidro"]],[1,C["green"]]],
+                showscale=True,
+                colorbar=dict(
+                    title=dict(text="% Renov.", font=dict(color=C["text"], size=10)),
+                    tickfont=dict(color=C["text"], size=9),
+                    thickness=12, len=0.6,
+                ),
+            ),
+            text=[f"{v:.0f}%" for v in idx["pct"]],
+            textposition="outside",
+            customdata=idx[["mw_renov","mw_total","empleos_generados","inversion_musd"]].values,
+            hovertemplate=(
+                "<b>%{x}</b><br>"
+                "% Renovable: %{y:.1f}%<br>"
+                "MW Renovables: %{customdata[0]:,.0f} MW<br>"
+                "MW Totales: %{customdata[1]:,.0f} MW<br>"
+                "Empleos ERNC: %{customdata[2]:,.0f}<br>"
+                "Inversion: USD %{customdata[3]:,.0f}M"
+                "<extra></extra>"
+            ),
+        ))
+        fig_an1.update_layout(**base_layout(
+            height=400,
+            title_text=(
+                f"% Renovable en la Matriz de cada Departamento ({g_anio})<br>"
+                f"<sup style='font-size:11px;'>"
+                f"(MW renovables / MW totales del depto — incluye gas, carbon, diesel)</sup>"
+            ),
+            xaxis_tickangle=-40,
+            yaxis=dict(title="% Renovable", range=[0, 115], gridcolor=C["grid"]),
+        ))
         st.plotly_chart(fig_an1, use_container_width=True)
+
+        # Nota explicativa
+        st.markdown(
+            f"<p style='color:{C['subtext']};font-size:11px;margin-top:-14px;'>"
+            "100% = el departamento solo tiene fuentes renovables registradas en la BD. "
+            "Los deptos con gas, carbon o diesel muestran valores menores. "
+            "Choco y Casanare tienen combustible/gas en su mix, por eso <100%.</p>",
+            unsafe_allow_html=True,
+        )
 
     with col_an2:
         inv_e = df_proy.groupby("departamento")["inversion_musd"].sum().reset_index()
