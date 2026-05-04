@@ -228,22 +228,25 @@ with tabs[0]:
 
 # ── TAB 1: CAPACIDAD RENOVABLE ────────────────────────────────────────────────
 with tabs[1]:
-    st.markdown(f"<h2 style='color:{C['accent']};'>"
-                f"Capacidad Instalada de Energias Renovables — {g_anio}</h2>",
-                unsafe_allow_html=True)
+    st.markdown(
+        f"<h2 style='color:{C['accent']};'>"
+        f"Capacidad Instalada de Energias Renovables — {g_anio}</h2>",
+        unsafe_allow_html=True,
+    )
 
-    # ── Filtros ───────────────────────────────────────────────────────────────
-    c1, c2, c3 = st.columns([1, 1, 0.8])
+    # ── Filtros ──────────────────────────────────────────────────────────────
+    c1, c2, c3 = st.columns([1, 1.2, 0.8])
     with c1:
         top_n = st.slider("Top departamentos", 3, 17, 10, key="cap_top")
     with c2:
-        cap_fuentes_sel = st.multiselect("Fuentes", FUENTES, default=FUENTES, key="cap_f")
+        cap_fuentes_sel = st.multiselect(
+            "Fuentes a incluir", FUENTES, default=FUENTES, key="cap_f")
     with c3:
-        cap_orden = st.radio("Ordenar por",
-                             ["Capacidad MW", "Inversion", "Proyectos"],
-                             horizontal=True, key="cap_ord")
+        cap_orden = st.radio(
+            "Ordenar por", ["Capacidad MW", "Inversion", "Proyectos"],
+            horizontal=True, key="cap_ord")
 
-    # ── Dataset filtrado (usa TODO df_cap, no solo cap_f del año) ─────────────
+    # ── Dataset filtrado ─────────────────────────────────────────────────────
     df_c = df_cap[
         (df_cap["anio"] == g_anio) &
         (df_cap["region"].isin(g_regiones)) &
@@ -252,8 +255,9 @@ with tabs[1]:
     if cap_fuentes_sel:
         df_c = df_c[df_c["fuente"].isin(cap_fuentes_sel)]
 
-    orden_col = {"Capacidad MW": "cap_mw", "Inversion": "inversion",
-                 "Proyectos": "proyectos"}[cap_orden]
+    orden_col = {"Capacidad MW": "cap_mw",
+                 "Inversion":    "inversion",
+                 "Proyectos":    "proyectos"}[cap_orden]
 
     rank = (df_c.groupby(["departamento", "region"])
             .agg(cap_mw=("capacidad_mw","sum"),
@@ -262,55 +266,67 @@ with tabs[1]:
                  inversion=("inversion_bill_cop","sum"))
             .reset_index()
             .sort_values(orden_col, ascending=False)
-            .head(top_n))
+            .head(top_n)
+            .reset_index(drop=True))
 
-    if rank.empty:
-        st.warning("Sin datos para los filtros seleccionados.")
-    else:
-        rank["pct"] = (rank["cap_mw"] / rank["cap_mw"].sum() * 100).round(1)
+    total_sum = rank["cap_mw"].sum() if not rank.empty else 1
+    rank["pct"] = (rank["cap_mw"] / total_sum * 100).round(1)
 
     por_fuente = (df_c.groupby("fuente")["capacidad_mw"].sum()
                   .reset_index()
                   .sort_values("capacidad_mw", ascending=False))
 
-    # ── Fila 1: Barras horizontales + Donut ───────────────────────────────────
+    # ── Fila 1: Ranking barras + Donut ───────────────────────────────────────
     col_bar, col_pie = st.columns([0.58, 0.42])
 
     with col_bar:
         if rank.empty:
-            st.info("Sin datos de ranking.")
+            st.info("Sin datos para los filtros seleccionados.")
         else:
             fig_bar = go.Figure()
+            # Barra principal de datos
             fig_bar.add_trace(go.Bar(
                 x=rank["cap_mw"],
                 y=rank["departamento"],
                 orientation="h",
-                marker_color=[REGION_COLORES.get(r, C["neutral"]) for r in rank["region"]],
-                text=[f"{v:,.0f} MW ({p}%)"
+                marker=dict(
+                    color=[REGION_COLORES.get(r, C["neutral"])
+                           for r in rank["region"]],
+                    line=dict(color=C["bg"], width=0.5),
+                ),
+                text=[f"{v:,.0f} MW  {p}%"
                       for v, p in zip(rank["cap_mw"], rank["pct"])],
                 textposition="outside",
                 textfont=dict(size=9, color=C["subtext"]),
                 customdata=rank[["region","proyectos","en_constr","inversion"]].values,
                 hovertemplate=(
-                    "<b>%{y}</b><br>Region: %{customdata[0]}<br>"
+                    "<b>%{y}</b><br>"
+                    "Region: %{customdata[0]}<br>"
                     "Capacidad: %{x:,.0f} MW<br>"
-                    "Proy. activos: %{customdata[1]}<br>"
-                    "En construccion: %{customdata[2]}<br>"
-                    "Inversion: %{customdata[3]:.2f} B.COP<extra></extra>"
+                    "Proy. activos: %{customdata[1]:.0f}<br>"
+                    "En construccion: %{customdata[2]:.0f}<br>"
+                    "Inversion: %{customdata[3]:.2f} B.COP"
+                    "<extra></extra>"
                 ),
                 showlegend=False,
+                name="",
             ))
+            # Traces dummy para la leyenda de regiones
             for reg, rc in REGION_COLORES.items():
                 fig_bar.add_trace(go.Bar(
-                    x=[None], y=[None], name=reg,
-                    marker_color=rc, showlegend=True))
-            fig_bar.update_layout(**base_layout(
-                height=440,
-                title_text=f"🏆 Top {top_n} Departamentos por {cap_orden}",
-                legend=dict(x=0.60, y=0.02),
-                xaxis=dict(gridcolor=C["grid"]),
-                yaxis=dict(categoryorder="total ascending", gridcolor=C["grid"]),
-            ))
+                    x=[None], y=[None],
+                    name=reg, marker_color=rc, showlegend=True))
+
+            fig_bar.update_layout(
+                **base_layout(
+                    height=440,
+                    title_text=f"Top {top_n} Departamentos — {cap_orden}",
+                    legend=dict(x=0.55, y=0.02),
+                    xaxis=dict(gridcolor=C["grid"], range=[0, rank["cap_mw"].max()*1.25]),
+                    yaxis=dict(categoryorder="total ascending", gridcolor=C["grid"]),
+                    barmode="overlay",
+                )
+            )
             st.plotly_chart(fig_bar, use_container_width=True)
 
     with col_pie:
@@ -328,12 +344,16 @@ with tabs[1]:
                 ),
                 textinfo="label+percent",
                 textfont=dict(size=10),
-                hovertemplate="<b>%{label}</b><br>%{value:,.1f} MW · %{percent}<extra></extra>",
+                hovertemplate=(
+                    "<b>%{label}</b><br>"
+                    "%{value:,.1f} MW · %{percent}"
+                    "<extra></extra>"
+                ),
             ))
             total_mw = por_fuente["capacidad_mw"].sum()
             fig_pie.update_layout(**base_layout(
                 height=440,
-                title_text="🔋 Mix por Fuente Energetica",
+                title_text="Mix por Fuente Energetica",
                 annotations=[dict(
                     text=f"<b>{total_mw:,.0f}</b><br>MW total",
                     x=0.5, y=0.5,
@@ -343,18 +363,15 @@ with tabs[1]:
             ))
             st.plotly_chart(fig_pie, use_container_width=True)
 
-    # ── Fila 2: Mapa de Colombia + Inversión por región ───────────────────────
+    # ── Fila 2: Mapa coroplético + Gráficos secundarios ──────────────────────
     st.markdown(
-        f"<h3 style='color:{C['accent2']};margin-top:8px;'>"
+        f"<h3 style='color:{C['accent2']};margin-top:4px;'>"
         "🗺️ Mapa de Capacidad Renovable por Departamento — Colombia</h3>",
         unsafe_allow_html=True,
     )
-
-    col_mapa, col_inv = st.columns([1.1, 0.9])
+    col_mapa, col_inv = st.columns([1.15, 0.85])
 
     with col_mapa:
-        # ── Mapa coroplético real de Colombia ─────────────────────────────────
-        # GeoJSON oficial DANE — departamentos (caticoa3/colombia_mapa @ GitHub)
         GEOJSON_URL = (
             "https://raw.githubusercontent.com/caticoa3/colombia_mapa"
             "/master/co_2018_MGN_DPTO_POLITICO.geojson"
@@ -362,45 +379,49 @@ with tabs[1]:
 
         @st.cache_data(show_spinner=False, ttl=86400)
         def cargar_geojson(url):
-            import requests, json
-            r = requests.get(url, timeout=15)
+            import requests
+            r = requests.get(url, timeout=20)
             r.raise_for_status()
             return r.json()
 
+        # Mapa de nombre GeoJSON → nombre en BD
+        GEONAME = {
+            "ANTIOQUIA":"Antioquia","ATLANTICO":"Atlantico",
+            "BOGOTA, D.C.":"Bogota D.C.","BOLIVAR":"Bolivar",
+            "BOYACA":"Boyaca","CALDAS":"Caldas",
+            "CAQUETA":"Caqueta","CAUCA":"Cauca",
+            "CESAR":"Cesar","CHOCO":"Choco",
+            "CORDOBA":"Cordoba","CUNDINAMARCA":"Cundinamarca",
+            "HUILA":"Huila","LA GUAJIRA":"La Guajira",
+            "MAGDALENA":"Magdalena","META":"Meta",
+            "NARINO":"Narino","NORTE DE SANTANDER":"Norte de Santander",
+            "QUINDIO":"Quindio","RISARALDA":"Risaralda",
+            "SANTANDER":"Santander","SUCRE":"Sucre",
+            "TOLIMA":"Tolima","VALLE DEL CAUCA":"Valle del Cauca",
+            "CASANARE":"Casanare","AMAZONAS":"Amazonas",
+            "GUAINIA":"Guainia","GUAVIARE":"Guaviare",
+            "VAUPES":"Vaupes","VICHADA":"Vichada",
+            "ARAUCA":"Arauca","PUTUMAYO":"Putumayo",
+            "SAN ANDRES, PROVIDENCIA Y SANTA CATALINA":"San Andres",
+        }
+
         try:
-            geojson_col = cargar_geojson(GEOJSON_URL)
+            geo = cargar_geojson(GEOJSON_URL)
 
-            # Normalizar nombres del GeoJSON para hacer match con la BD
-            # El campo es properties.DPTO_CNMBR (mayúsculas, sin tildes)
-            NOMBRE_MAP = {
-                "ANTIOQUIA": "Antioquia", "ATLANTICO": "Atlantico",
-                "BOGOTA": "Bogota D.C.", "BOLIVAR": "Bolivar",
-                "BOYACA": "Boyaca", "CALDAS": "Caldas",
-                "CAQUETA": "Caqueta", "CAUCA": "Cauca",
-                "CESAR": "Cesar", "CHOCO": "Choco",
-                "CORDOBA": "Cordoba", "CUNDINAMARCA": "Cundinamarca",
-                "HUILA": "Huila", "LA GUAJIRA": "La Guajira",
-                "MAGDALENA": "Magdalena", "META": "Meta",
-                "NARINO": "Narino", "NORTE DE SANTANDER": "Norte de Santander",
-                "QUINDIO": "Quindio", "RISARALDA": "Risaralda",
-                "SANTANDER": "Santander", "SUCRE": "Sucre",
-                "TOLIMA": "Tolima", "VALLE DEL CAUCA": "Valle del Cauca",
-                "CASANARE": "Casanare", "AMAZONAS": "Amazonas",
-                "GUAINIA": "Guainia", "GUAVIARE": "Guaviare",
-                "VAUPES": "Vaupes", "VICHADA": "Vichada",
-                "ARAUCA": "Arauca", "PUTUMAYO": "Putumayo",
-                "SAN ANDRES": "San Andres",
-            }
-            # Agregar campo normalizado al GeoJSON
-            for feat in geojson_col["features"]:
+            # Extraer lista completa de departamentos del GeoJSON
+            todos_deptos = []
+            for feat in geo["features"]:
                 raw = feat["properties"].get("DPTO_CNMBR", "")
-                feat["properties"]["nombre_bd"] = NOMBRE_MAP.get(
-                    raw.upper().replace("Á","A").replace("Ó","O")
-                    .replace("É","E").replace("Í","I").replace("Ú","U"), raw.title()
-                )
+                # normalizar tildes
+                norm = (raw.upper()
+                        .replace("Á","A").replace("É","E").replace("Í","I")
+                        .replace("Ó","O").replace("Ú","U").replace("Ñ","N"))
+                nombre_bd = GEONAME.get(norm, raw.title())
+                feat["properties"]["nombre_bd"] = nombre_bd
+                todos_deptos.append(nombre_bd)
 
-            # Capacidad renovable por departamento (año global)
-            df_mapa = (
+            # Capacidad en BD para el año seleccionado
+            df_mapa_bd = (
                 df_cap[
                     (df_cap["anio"] == g_anio) &
                     (df_cap["tipo"].isin(["renovable","alternativa"]))
@@ -409,81 +430,92 @@ with tabs[1]:
                 .sum()
                 .reset_index(name="cap_mw")
             )
-            # Proyectos y empleos
-            proy_d = (df_proy.groupby("departamento")
+
+            # Proyectos para tooltip
+            proy_d = (df_proy
+                      .groupby("departamento")
                       .agg(n_proy=("nombre_proyecto","count"),
                            inv=("inversion_musd","sum"),
                            emp=("empleos_generados","sum"))
                       .reset_index())
-            df_mapa = df_mapa.merge(proy_d, on="departamento", how="left").fillna(0)
 
-            # Texto hover personalizado
-            df_mapa["hover"] = df_mapa.apply(
-                lambda r: (
-                    f"<b>{r['departamento']}</b><br>"
-                    f"Capacidad renovable: {r['cap_mw']:,.0f} MW<br>"
-                    f"Proyectos ERNC: {int(r['n_proy'])}<br>"
-                    f"Inversion: USD {r['inv']:,.0f}M<br>"
-                    f"Empleos: {int(r['emp']):,}"
-                ), axis=1
-            )
+            # *** Construir DataFrame con TODOS los departamentos del GeoJSON ***
+            # Los que no tienen datos en BD quedan con cap_mw = 0
+            df_todos = pd.DataFrame({"departamento": todos_deptos}).drop_duplicates()
+            df_mapa = (df_todos
+                       .merge(df_mapa_bd, on="departamento", how="left")
+                       .merge(proy_d,     on="departamento", how="left")
+                       .fillna(0))
 
-            fig_mapa = go.Figure(go.Choropleth(
-                geojson=geojson_col,
+            df_mapa["hover"] = df_mapa.apply(lambda r: (
+                f"<b>{r['departamento']}</b><br>"
+                f"Capacidad renovable: {r['cap_mw']:,.0f} MW<br>"
+                f"Proyectos ERNC: {int(r['n_proy'])}<br>"
+                f"Inversion: USD {r['inv']:,.0f}M<br>"
+                f"Empleos: {int(r['emp']):,}"
+            ), axis=1)
+
+            fig_mapa = go.Figure()
+
+            # Capa base — todos los deptos con escala de color
+            fig_mapa.add_trace(go.Choropleth(
+                geojson=geo,
                 locations=df_mapa["departamento"],
                 featureidkey="properties.nombre_bd",
                 z=df_mapa["cap_mw"],
                 colorscale=[
-                    [0.0,  "#0A1628"],
-                    [0.15, "#0F2A5A"],
-                    [0.35, "#1B3A5C"],
-                    [0.55, "#1D9E75"],
-                    [0.75, "#FFB700"],
-                    [1.0,  "#00C896"],
+                    [0.00, "#0D1B2A"],   # 0 MW — fondo oscuro
+                    [0.01, "#112744"],   # casi 0
+                    [0.20, "#1B3A5C"],
+                    [0.45, "#1D7A6A"],
+                    [0.70, "#1D9E75"],
+                    [0.85, "#FFB700"],
+                    [1.00, "#00C896"],
                 ],
                 zmin=0,
                 zmax=df_mapa["cap_mw"].max(),
                 marker=dict(
-                    line=dict(color="#E8EDF2", width=0.6),
-                    opacity=0.92,
+                    line=dict(color="#4A90B8", width=0.8),
+                    opacity=0.9,
                 ),
                 colorbar=dict(
-                    title=dict(text="MW Renovable", font=dict(color=C["text"], size=11)),
-                    tickfont=dict(color=C["text"], size=10),
+                    title=dict(text="MW<br>Renovable",
+                               font=dict(color=C["text"], size=10)),
+                    tickfont=dict(color=C["text"], size=9),
                     bgcolor=C["bg2"],
                     bordercolor=C["border"],
-                    thickness=14,
-                    len=0.75,
-                    x=1.02,
+                    thickness=12,
+                    len=0.7,
+                    x=1.01,
                 ),
                 text=df_mapa["hover"],
                 hovertemplate="%{text}<extra></extra>",
-                name="",
+                name="MW Renovable",
+                showscale=True,
             ))
 
-            # Estrellas Mision Transmision
+            # Estrella — nodos Misión Transmisión
             MISION = [
-                (11.54, -72.91, "La Guajira", "Hub Eolico/Solar 850+498 MW"),
-                (6.25,  -75.56, "Antioquia",  "Ituango 2.400 MW en construccion"),
-                (4.44,  -75.23, "Tolima",     "Solar Central 196 MW operativo"),
-                (10.97, -74.78, "Atlantico",  "Solar Caribe 280 MW operativo"),
-                (2.44,  -76.61, "Cauca",      "Hidroelectrica 1.100 MW"),
+                (11.54, -72.91, "La Guajira",  "Hub Eolico/Solar  ★ 850+498 MW"),
+                ( 6.25, -75.56, "Antioquia",   "Ituango 2.400 MW (en construccion)"),
+                ( 4.44, -75.23, "Tolima",      "Solar Central 196 MW operativo"),
+                (10.97, -74.78, "Atlantico",   "Solar Caribe 280 MW operativo"),
+                ( 2.44, -76.61, "Cauca",       "Hidroelectrica 1.100 MW"),
             ]
             fig_mapa.add_trace(go.Scattergeo(
                 lat=[p[0] for p in MISION],
                 lon=[p[1] for p in MISION],
-                mode="markers+text",
+                mode="markers",
                 marker=dict(
-                    symbol="star", size=14,
+                    symbol="star", size=16,
                     color=C["solar"],
-                    line=dict(color="white", width=1),
+                    line=dict(color="white", width=1.2),
                 ),
-                text=["★"]*len(MISION),
-                textfont=dict(size=9, color="white"),
                 customdata=[[p[2], p[3]] for p in MISION],
                 hovertemplate=(
                     "<b>%{customdata[0]}</b><br>"
-                    "Mision Transmision:<br>%{customdata[1]}"
+                    "Mision Transmision:<br>"
+                    "%{customdata[1]}"
                     "<extra></extra>"
                 ),
                 name="Mision Transmision ★",
@@ -491,25 +523,27 @@ with tabs[1]:
             ))
 
             fig_mapa.update_layout(
-                height=500,
+                height=520,
                 paper_bgcolor=C["bg"],
                 plot_bgcolor=C["bg"],
                 font=dict(family="Georgia, serif", color=C["text"], size=11),
                 title=dict(
-                    text=f"🗺️ Capacidad Renovable por Departamento — Colombia {g_anio}",
+                    text=f"Capacidad Renovable por Departamento — Colombia {g_anio}",
                     font=dict(size=13, color=C["accent"], family="Georgia, serif"),
                     x=0.01,
                 ),
                 geo=dict(
-                    fitbounds="locations",
-                    visible=False,
+                    fitbounds="locations",  # ajusta zoom a los polígonos
+                    visible=False,          # oculta el fondo mundial
                     bgcolor=C["bg"],
                     showframe=False,
                     showcoastlines=False,
+                    showland=False,
+                    showocean=False,
                 ),
                 legend=dict(
-                    x=0.01, y=0.01,
-                    bgcolor="rgba(13,27,42,0.85)",
+                    x=0.01, y=0.06,
+                    bgcolor="rgba(13,27,42,0.88)",
                     bordercolor=C["border"],
                     borderwidth=1,
                     font=dict(size=10),
@@ -519,85 +553,69 @@ with tabs[1]:
                     bordercolor=C["accent"],
                     font=dict(color=C["text"], size=12),
                 ),
-                margin=dict(l=0, r=10, t=50, b=0),
+                margin=dict(l=0, r=10, t=45, b=0),
             )
             st.plotly_chart(fig_mapa, use_container_width=True)
-
-            # Leyenda de escala de color
             st.markdown(
-                f"<p style='color:{C['subtext']};font-size:11px;margin-top:-8px;'>"
-                f"Escurecido = menor capacidad  |  "
-                f"Amarillo/verde = mayor capacidad  |  "
-                f"★ = Nodos prioritarios Mision Transmision UPME  |  "
-                f"Fuente GeoJSON: DANE via caticoa3/colombia_mapa</p>",
+                f"<p style='color:{C['subtext']};font-size:10px;margin-top:-10px;'>"
+                "Fuente geometría: DANE — geoportal.dane.gov.co  |  "
+                "★ Nodos prioritarios Misión Transmisión UPME  |  "
+                "Oscuro = sin datos / 0 MW  →  Verde/Amarillo = mayor capacidad</p>",
                 unsafe_allow_html=True,
             )
 
         except Exception as e:
-            # Fallback: mapa de burbujas si falla la carga del GeoJSON
-            st.warning(
-                f"No se pudo cargar el GeoJSON ({e}). "
-                "Mostrando mapa de burbujas alternativo."
-            )
+            st.warning(f"GeoJSON no disponible ({e}). Mostrando mapa alternativo.")
+            # Fallback burbujas
             COORDS = {
                 "Antioquia":(6.25,-75.56),"Atlantico":(10.97,-74.78),
-                "Bogota D.C.":(4.71,-74.07),"Bolivar":(8.65,-74.03),
-                "Boyaca":(5.54,-73.37),"Caldas":(5.07,-75.51),
-                "Caqueta":(1.61,-75.61),"Cauca":(2.44,-76.61),
-                "Cesar":(10.46,-73.25),"Choco":(5.69,-76.66),
-                "Cordoba":(8.75,-75.88),"Cundinamarca":(5.0,-74.0),
+                "Bogota D.C.":(4.71,-74.07),"Cauca":(2.44,-76.61),
+                "Cesar":(10.46,-73.25),"Cundinamarca":(5.0,-74.0),
                 "Huila":(2.54,-75.53),"La Guajira":(11.54,-72.91),
-                "Magdalena":(10.41,-74.41),"Meta":(4.15,-73.64),
-                "Narino":(1.21,-77.28),"Norte de Santander":(7.89,-72.51),
-                "Quindio":(4.46,-75.67),"Risaralda":(4.81,-75.7),
-                "Santander":(7.12,-73.12),"Sucre":(8.81,-74.72),
-                "Tolima":(4.44,-75.23),"Valle del Cauca":(3.8,-76.64),
-                "Casanare":(5.34,-72.39),"Amazonas":(-1.44,-71.57),
-                "Guainia":(2.59,-68.52),"Guaviare":(2.08,-72.64),
-                "Vaupes":(0.86,-70.81),"Vichada":(4.42,-69.29),
+                "Meta":(4.15,-73.64),"Narino":(1.21,-77.28),
+                "Santander":(7.12,-73.12),"Tolima":(4.44,-75.23),
+                "Valle del Cauca":(3.8,-76.64),
             }
-            df_b = (
-                df_cap[(df_cap["anio"]==g_anio)&(df_cap["tipo"].isin(["renovable","alternativa"]))]
-                .groupby("departamento")["capacidad_mw"].sum().reset_index()
-            )
-            df_b["lat"] = df_b["departamento"].map(lambda d: COORDS.get(d,(4.5,-74))[0])
-            df_b["lon"] = df_b["departamento"].map(lambda d: COORDS.get(d,(4.5,-74))[1])
-            df_b["sz"] = (df_b["capacidad_mw"]/df_b["capacidad_mw"].max()*50+5).fillna(5)
-            fig_b = go.Figure(go.Scattergeo(
-                lat=df_b["lat"], lon=df_b["lon"], mode="markers",
+            df_b = (df_cap[(df_cap["anio"]==g_anio)&(df_cap["tipo"].isin(["renovable","alternativa"]))]
+                    .groupby("departamento")["capacidad_mw"].sum().reset_index())
+            df_b["lat"]=df_b["departamento"].map(lambda d:COORDS.get(d,(4.5,-74))[0])
+            df_b["lon"]=df_b["departamento"].map(lambda d:COORDS.get(d,(4.5,-74))[1])
+            df_b["sz"]=(df_b["capacidad_mw"]/df_b["capacidad_mw"].max()*50+5).fillna(5)
+            fb=go.Figure(go.Scattergeo(
+                lat=df_b["lat"],lon=df_b["lon"],mode="markers+text",
                 marker=dict(size=df_b["sz"],color=df_b["capacidad_mw"],
-                    colorscale=[[0,C["bg2"]],[0.5,C["eolica"]],[1,C["green"]]],
-                    showscale=True),
-                text=df_b["departamento"],
-                hovertemplate="<b>%{text}</b><br>%{marker.color:,.0f} MW<extra></extra>",
-            ))
-            fig_b.update_layout(height=480,paper_bgcolor=C["bg"],
+                    colorscale=[[0,C["bg2"]],[0.5,C["eolica"]],[1,C["green"]]],showscale=True),
+                text=df_b["departamento"],textposition="top center",
+                textfont=dict(size=7,color=C["text"]),
+                hovertemplate="<b>%{text}</b><br>%{marker.color:,.0f} MW<extra></extra>"))
+            fb.update_layout(height=480,paper_bgcolor=C["bg"],
                 geo=dict(scope="south america",center=dict(lat=4.5,lon=-74.5),
                     projection_scale=5.5,showland=True,landcolor="#1a2744",
                     showocean=True,oceancolor="#0a1628",showcountries=True,
                     countrycolor="#2D3250",bgcolor=C["bg"],
                     lataxis=dict(range=[-5,15]),lonaxis=dict(range=[-82,-65])),
                 margin=dict(l=0,r=0,t=40,b=0))
-            st.plotly_chart(fig_b, use_container_width=True)
+            st.plotly_chart(fb, use_container_width=True)
 
     with col_inv:
         # Inversión apilada por región y fuente
-        inv_reg = df_c.groupby(["region", "fuente"])["inversion_bill_cop"].sum().reset_index()
-        fig_inv = go.Figure()
-        for fuente in inv_reg["fuente"].unique():
-            sub = inv_reg[inv_reg["fuente"] == fuente]
-            fig_inv.add_trace(go.Bar(
-                x=sub["region"], y=sub["inversion_bill_cop"],
-                name=fuente,
-                marker_color=FUENTE_COLORES.get(fuente, C["neutral"]),
-                hovertemplate=f"<b>{fuente}</b><br>%{{x}}: %{{y:.2f}} B.COP<extra></extra>",
+        inv_reg = df_c.groupby(["region","fuente"])["inversion_bill_cop"].sum().reset_index()
+        if not inv_reg.empty:
+            fig_inv = go.Figure()
+            for fuente in inv_reg["fuente"].unique():
+                sub = inv_reg[inv_reg["fuente"]==fuente]
+                fig_inv.add_trace(go.Bar(
+                    x=sub["region"], y=sub["inversion_bill_cop"],
+                    name=fuente,
+                    marker_color=FUENTE_COLORES.get(fuente, C["neutral"]),
+                    hovertemplate=f"<b>{fuente}</b><br>%{{x}}: %{{y:.2f}} B.COP<extra></extra>",
+                ))
+            fig_inv.update_layout(**base_layout(
+                barmode="stack", height=240,
+                title_text="Inversion por Region y Fuente (Billones COP)",
+                xaxis_title="Region", yaxis_title="B.COP",
             ))
-        fig_inv.update_layout(**base_layout(
-            barmode="stack", height=220,
-            title_text="💰 Inversion por Region y Fuente (Billones COP)",
-            xaxis_title="Region", yaxis_title="B.COP",
-        ))
-        st.plotly_chart(fig_inv, use_container_width=True)
+            st.plotly_chart(fig_inv, use_container_width=True)
 
         # Diversificación de fuentes
         div_df = (df_c.groupby("departamento")["fuente"]
@@ -605,32 +623,33 @@ with tabs[1]:
                   .reset_index(name="n_fuentes")
                   .sort_values("n_fuentes", ascending=False)
                   .head(12))
-        fig_div = go.Figure(go.Bar(
-            x=div_df["departamento"],
-            y=div_df["n_fuentes"],
-            marker=dict(
-                color=div_df["n_fuentes"],
-                colorscale=[[0, C["bg2"]], [0.5, C["eolica"]], [1, C["green"]]],
-                showscale=False,
-            ),
-            text=div_df["n_fuentes"],
-            textposition="outside",
-            hovertemplate="<b>%{x}</b><br>%{y} tipos de fuente<extra></extra>",
-        ))
-        fig_div.update_layout(**base_layout(
-            height=230,
-            title_text="🌈 Diversificacion de Fuentes por Depto",
-            xaxis_tickangle=-30,
-            yaxis_title="N° tipos",
-        ))
-        st.plotly_chart(fig_div, use_container_width=True)
+        if not div_df.empty:
+            fig_div = go.Figure(go.Bar(
+                x=div_df["departamento"],
+                y=div_df["n_fuentes"],
+                marker=dict(
+                    color=div_df["n_fuentes"],
+                    colorscale=[[0,C["bg2"]],[0.5,C["eolica"]],[1,C["green"]]],
+                    showscale=False,
+                ),
+                text=div_df["n_fuentes"],
+                textposition="outside",
+                hovertemplate="<b>%{x}</b><br>%{y} tipos de fuente<extra></extra>",
+            ))
+            fig_div.update_layout(**base_layout(
+                height=255,
+                title_text="Diversificacion de Fuentes por Depto",
+                xaxis_tickangle=-35,
+                yaxis_title="N° tipos",
+            ))
+            st.plotly_chart(fig_div, use_container_width=True)
 
-    with st.expander("📋 Ver tabla completa"):
+    with st.expander("📋 Ver tabla completa de ranking"):
         if not rank.empty:
             st.dataframe(
                 rank.rename(columns={
-                    "cap_mw": "MW", "proyectos": "Activos",
-                    "en_constr": "En Constr.", "inversion": "B.COP",
+                    "cap_mw":"MW","proyectos":"Activos",
+                    "en_constr":"En Constr.","inversion":"B.COP",
                 }),
                 use_container_width=True, hide_index=True,
             )
