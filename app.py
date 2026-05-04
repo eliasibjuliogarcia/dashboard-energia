@@ -311,7 +311,7 @@ with tabs[1]:
 with tabs[2]:
     st.markdown(f"<h2 style='color:{C['accent']};'>Evolucion Historica por Fuente 2019-2023</h2>", unsafe_allow_html=True)
     e1,e2,e3,e4 = st.columns([1.4,1.4,1,1])
-    with e1: ev_fuentes = st.multiselect("Fuentes",FUENTES,default=["Solar Fotovoltaica","Eolica","Hidroelectrica"],key="ev_f")
+    with e1: ev_fuentes = st.multiselect("Fuentes",FUENTES,default=FUENTES[:3],key="ev_f")
     with e2: ev_deptos = st.multiselect("Departamento",["Todos"]+DEPTOS,default=["Todos"],key="ev_d")
     with e3:
         EV_M = {"Capacidad (MW)":"capacidad_mw","Proyectos activos":"proyectos_activos",
