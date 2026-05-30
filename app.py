@@ -2083,714 +2083,250 @@ with tabs[5]:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# ──────────────────────────────────────────────────────────────────────────────
-
 # TAB 6 · IA PREDICTIVA
 # ──────────────────────────────────────────────────────────────────────────────
 with tabs[6]:
     st.markdown(neon_header(
         "🧠", "Analítica Predictiva e Inteligencia Energética",
-        subtitle="regresión exponencial · polinomial · suavizado · correlaciones · escenarios",
+        subtitle="pronósticos · escenarios · insights automáticos",
         badge="IA · MODELOS ML",
         badge_col=P["amber"],
     ), unsafe_allow_html=True)
 
-    # ── Funciones de modelado ──────────────────────────────────────────────────
-    def fit_exponencial(x, y):
-        """Ajuste exponencial y = a * e^(b*x). Retorna (a, b, y_pred, r2, rmse)."""
-        log_y = np.log(np.maximum(y, 0.1))
-        coeffs = np.polyfit(x, log_y, 1)
-        b, log_a = coeffs
-        a = np.exp(log_a)
-        y_pred = a * np.exp(b * x)
-        ss_res = np.sum((y - y_pred) ** 2)
-        ss_tot = np.sum((y - np.mean(y)) ** 2)
-        r2 = 1 - ss_res / max(ss_tot, 1e-9)
-        rmse = np.sqrt(np.mean((y - y_pred) ** 2))
-        return a, b, y_pred, r2, rmse
+    # ── Pronóstico solar ──────────────────────────────────────────────────────
+    ia_l, ia_r = st.columns([1.4, 0.6])
 
-    def fit_polinomial(x, y, deg=2):
-        """Ajuste polinomial de grado deg. Retorna (coeffs, y_pred, r2, rmse)."""
-        coeffs = np.polyfit(x, y, deg)
-        y_pred = np.polyval(coeffs, x)
-        ss_res = np.sum((y - y_pred) ** 2)
-        ss_tot = np.sum((y - np.mean(y)) ** 2)
-        r2 = 1 - ss_res / max(ss_tot, 1e-9)
-        rmse = np.sqrt(np.mean((y - y_pred) ** 2))
-        return coeffs, y_pred, r2, rmse
+    with ia_l:
+        # Modelo: regresión exponencial para solar
+        solar_hist = df_cap[df_cap["fuente"]=="Solar"].sort_values("anio").copy()
+        y = solar_hist["capacidad_mw"].values
+        x = np.arange(len(y))
 
-    def suavizado_exponencial(y, alpha=0.3):
-        """Suavizado exponencial simple (EMA)."""
-        s = np.zeros(len(y))
-        s[0] = y[0]
-        for i in range(1, len(y)):
-            s[i] = alpha * y[i] + (1 - alpha) * s[i - 1]
-        return s
+        # Ajuste exponencial suavizado
+        log_y   = np.log(np.maximum(y, 1))
+        coeffs  = np.polyfit(x, log_y, 1)
+        ANIOS_PRED = list(range(2018, 2032))
 
-    def holt_winters_simple(y, alpha=0.35, beta=0.25, n_forecast=5):
-        """Suavizado Holt (tendencia) con proyección."""
-        n = len(y)
-        l = np.zeros(n)
-        b = np.zeros(n)
-        l[0] = y[0]
-        b[0] = y[1] - y[0] if n > 1 else 0
-        for t in range(1, n):
-            l[t] = alpha * y[t] + (1 - alpha) * (l[t - 1] + b[t - 1])
-            b[t] = beta * (l[t] - l[t - 1]) + (1 - beta) * b[t - 1]
-        forecast = [l[-1] + i * b[-1] for i in range(1, n_forecast + 1)]
-        return l, forecast
+        x_full  = np.arange(len(ANIOS_PRED))
+        y_pred  = np.exp(np.polyval(coeffs, x_full))
 
-    # ── Selector de fuente energética ─────────────────────────────────────────
-    st.markdown(
-        f'<div style="color:{P["text_lo"]};font-family:JetBrains Mono,monospace;'
-        f'font-size:9px;letter-spacing:2px;margin-bottom:6px;">'
-        f'SELECCIONAR FUENTE PARA MODELADO</div>',
-        unsafe_allow_html=True)
+        # Bandas de confianza
+        residuals = y - np.exp(np.polyval(coeffs, x))
+        std_r     = np.std(residuals)
+        y_hi = y_pred + std_r * 1.5 * (x_full / max(x_full) + 0.5)
+        y_lo = y_pred - std_r * 1.2 * (x_full / max(x_full) + 0.3)
+        y_lo = np.maximum(y_lo, y_pred * 0.6)
 
-    ia_ctrl1, ia_ctrl2, ia_ctrl3 = st.columns([1, 1, 1])
-    with ia_ctrl1:
-        fuente_ia = st.selectbox(
-            "Fuente energética",
-            ["Solar", "Eólica", "Hidroeléctrica", "Gas Natural", "Carbón", "Biomasa"],
-            index=0, key="ia_fuente")
-    with ia_ctrl2:
-        horizonte = st.slider("Horizonte de proyección (años)", 2, 10, 5, key="ia_horiz")
-    with ia_ctrl3:
-        grado_poly = st.selectbox("Grado polinomial", [2, 3, 4], index=0, key="ia_grado")
+        n_hist = len(ANIOS)
+        fig_pred = go.Figure()
 
-    # ── Datos de la fuente seleccionada ───────────────────────────────────────
-    src = df_cap[df_cap["fuente"] == fuente_ia].sort_values("anio").copy()
-    y_hist = src["capacidad_mw"].values.astype(float)
-    x_hist = np.arange(len(y_hist))
-    anios_hist = src["anio"].tolist()
-    n = len(y_hist)
-
-    # Años futuros para proyección
-    anios_fut = list(range(anios_hist[-1] + 1, anios_hist[-1] + horizonte + 1))
-    x_fut = np.arange(n, n + horizonte)
-    x_full = np.concatenate([x_hist, x_fut])
-    anios_full = anios_hist + anios_fut
-
-    # ── Ajustar modelos ────────────────────────────────────────────────────────
-    a_exp, b_exp, y_exp_hist, r2_exp, rmse_exp = fit_exponencial(x_hist, y_hist)
-    y_exp_fut  = a_exp * np.exp(b_exp * x_fut)
-    y_exp_full = a_exp * np.exp(b_exp * x_full)
-
-    coeffs_p, y_poly_hist, r2_poly, rmse_poly = fit_polinomial(x_hist, y_hist, grado_poly)
-    y_poly_fut  = np.polyval(coeffs_p, x_fut)
-    y_poly_full = np.polyval(coeffs_p, x_full)
-
-    ema_hist     = suavizado_exponencial(y_hist, alpha=0.35)
-    l_holt, fc_holt = holt_winters_simple(y_hist, alpha=0.35, beta=0.25, n_forecast=horizonte)
-    y_holt_full = list(l_holt) + fc_holt
-
-    # Bandas de confianza (±1.5σ residuales)
-    resid_exp  = y_hist - y_exp_hist
-    sigma_exp  = np.std(resid_exp)
-    ci_factor  = np.linspace(1.0, 1.8, horizonte)
-    y_exp_hi   = y_exp_fut + sigma_exp * 1.5 * ci_factor
-    y_exp_lo   = np.maximum(y_exp_fut - sigma_exp * 1.2 * ci_factor, y_exp_fut * 0.6)
-
-    # ── GRÁFICO PRINCIPAL — comparativo de modelos ────────────────────────────
-    ia_g1, ia_g2 = st.columns([1.55, 0.45])
-    with ia_g1:
-        color_fuente = ENERGY_COLORS.get(fuente_ia, P["neon"])
-        fig_ia = go.Figure()
-
-        # Banda de confianza exponencial
-        fig_ia.add_trace(go.Scatter(
-            x=anios_fut + anios_fut[::-1],
-            y=list(y_exp_hi) + list(y_exp_lo[::-1]),
+        # Banda de incertidumbre
+        fig_pred.add_trace(go.Scatter(
+            x=ANIOS_PRED[n_hist-1:] + ANIOS_PRED[n_hist-1:][::-1],
+            y=list(y_hi[n_hist-1:]) + list(y_lo[n_hist-1:])[::-1],
             fill="toself",
-            fillcolor=_ca(color_fuente, "18"),
+            fillcolor=P["amber_glow"],
             line=dict(color="rgba(0,0,0,0)"),
-            showlegend=False, hoverinfo="skip",
-            name="IC Exponencial",
+            showlegend=False,
+            hoverinfo="skip",
         ))
-
-        # Modelo exponencial — proyección
-        fig_ia.add_trace(go.Scatter(
-            x=anios_fut,
-            y=y_exp_fut,
+        # Banda histórica leve
+        fig_pred.add_trace(go.Scatter(
+            x=ANIOS_PRED[:n_hist] + ANIOS_PRED[:n_hist][::-1],
+            y=list(y_hi[:n_hist]) + list(y_lo[:n_hist])[::-1],
+            fill="toself",
+            fillcolor=P["neon_glow"],
+            line=dict(color="rgba(0,0,0,0)"),
+            showlegend=False,
+            hoverinfo="skip",
+        ))
+        # Tendencia proyectada
+        fig_pred.add_trace(go.Scatter(
+            x=ANIOS_PRED[n_hist-1:],
+            y=y_pred[n_hist-1:],
             mode="lines",
-            line=dict(color=color_fuente, width=2.5, dash="dash"),
-            name=f"Exp. Proyección",
+            line=dict(color=P["amber"], width=2.5, dash="dot"),
+            name="Proyección IA",
             hovertemplate="%{x}: %{y:,.0f} MW<extra></extra>",
         ))
-
-        # Modelo polinomial — proyección
-        fig_ia.add_trace(go.Scatter(
-            x=anios_fut,
-            y=y_poly_fut,
-            mode="lines",
-            line=dict(color=P["ice"], width=2, dash="dot"),
-            name=f"Poly. Grado {grado_poly}",
-            hovertemplate="%{x}: %{y:,.0f} MW<extra></extra>",
-        ))
-
-        # Modelo Holt-Winters — proyección
-        fig_ia.add_trace(go.Scatter(
-            x=anios_fut,
-            y=fc_holt,
-            mode="lines",
-            line=dict(color=P["amber"], width=2, dash="longdash"),
-            name="Holt-Winters",
-            hovertemplate="%{x}: %{y:,.0f} MW<extra></extra>",
-        ))
-
-        # EMA histórica
-        fig_ia.add_trace(go.Scatter(
-            x=anios_hist,
-            y=ema_hist,
-            mode="lines",
-            line=dict(color=P["neon_dim"], width=1.5, dash="dot"),
-            name="EMA (α=0.35)",
-            hovertemplate="%{x}: %{y:,.0f} MW<extra></extra>",
-        ))
-
-        # Datos históricos reales (encima de todo)
-        fig_ia.add_trace(go.Scatter(
-            x=anios_hist,
-            y=y_hist,
-            mode="lines+markers",
-            line=dict(color=color_fuente, width=3),
-            marker=dict(size=9, color=P["void"],
-                        line=dict(color=color_fuente, width=2.5)),
-            fill="tozeroy",
-            fillcolor=_ca(color_fuente, "10"),
-            name="Histórico Real",
-            hovertemplate="%{x}: %{y:,.0f} MW<extra></extra>",
-        ))
-
-        # Línea divisoria hist/pred
-        fig_ia.add_vline(
-            x=anios_hist[-1], line_dash="dot",
-            line_color=P["text_lo"], line_width=1.5,
-            annotation_text="HOY",
-            annotation_font=dict(color=P["text_lo"], size=9,
-                                 family="JetBrains Mono, monospace"),
-        )
-
-        title_cagr = b_exp * 100
-        fig_ia.update_layout(**plotly_base(
-            height=400,
-            title_text=f"MODELOS PREDICTIVOS · {fuente_ia.upper()} · CAGR EXPONENCIAL: {title_cagr:+.1f}%/AÑO",
-            xaxis_title="AÑO", yaxis_title="MW",
-            hovermode="x unified",
-        ))
-        st.plotly_chart(fig_ia, use_container_width=True)
-
-    with ia_g2:
-        # Panel de métricas de modelos
-        cagr_real = ((y_hist[-1] / y_hist[0]) ** (1 / (n - 1)) - 1) * 100 if n > 1 else 0.0
-        r2_holt   = 1 - np.sum((y_hist - l_holt) ** 2) / max(np.sum((y_hist - np.mean(y_hist)) ** 2), 1e-9)
-        rmse_holt = float(np.sqrt(np.mean((y_hist - l_holt) ** 2)))
-
-        metricas = [
-            ("Regresión Exponencial", r2_exp,  rmse_exp,  color_fuente, b_exp * 100),
-            (f"Polinomial Grado {grado_poly}",  r2_poly, rmse_poly, P["ice"],    None),
-            ("Holt-Winters",          r2_holt, rmse_holt, P["amber"],  None),
-        ]
-
-        st.markdown(
-            f'<div style="background:linear-gradient(135deg,{P["surface"]},{P["raised"]});'
-            f'border:1px solid {P["rimhi"]};border-radius:10px;padding:16px;height:400px;overflow:auto;">',
-            unsafe_allow_html=True)
-        st.markdown(
-            f'<div style="color:{P["amber"]};font-family:Barlow Condensed,sans-serif;'
-            f'font-size:13px;font-weight:700;letter-spacing:1px;margin-bottom:12px;'
-            f'border-bottom:1px solid {P["rim"]};padding-bottom:8px;">'
-            f'📊 MÉTRICAS DE MODELOS</div>',
-            unsafe_allow_html=True)
-
-        for nombre, r2, rmse_v, col, cagr_m in metricas:
-            r2_pct  = max(0, min(r2 * 100, 100))
-            r2_col  = P["neon"] if r2 > 0.92 else (P["amber"] if r2 > 0.75 else P["alert"])
-            extra   = ""
-            if cagr_m is not None:
-                extra = (f'<span style="color:{P["text_lo"]};font-size:9px;'
-                         f'font-family:JetBrains Mono,monospace;"> · CAGR: '
-                         f'<span style="color:{col};">{cagr_m:+.1f}%</span></span>')
-            st.markdown(f"""
-<div style="margin-bottom:14px;">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
-    <span style="color:{P['text_mid']};font-size:11px;font-weight:600;">{nombre}</span>
-    {extra}
-  </div>
-  <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
-    <span style="color:{P['text_lo']};font-family:JetBrains Mono,monospace;font-size:9px;">R² · BONDAD DE AJUSTE</span>
-    <span style="color:{r2_col};font-family:JetBrains Mono,monospace;font-size:10px;font-weight:600;">{r2:.4f}</span>
-  </div>
-  <div style="background:{P['surface']};border-radius:3px;height:4px;overflow:hidden;border:1px solid {P['rim']};margin-bottom:6px;">
-    <div style="width:{r2_pct:.1f}%;height:100%;background:linear-gradient(90deg,{_ca(r2_col,'66')},{r2_col});border-radius:3px;"></div>
-  </div>
-  <div style="display:flex;justify-content:space-between;">
-    <span style="color:{P['text_lo']};font-family:JetBrains Mono,monospace;font-size:9px;">RMSE (MW)</span>
-    <span style="color:{P['text_lo']};font-family:JetBrains Mono,monospace;font-size:9px;font-weight:500;">{rmse_v:,.1f}</span>
-  </div>
-</div>""", unsafe_allow_html=True)
-
-        # CAGR real
-        st.markdown(
-            f'<div style="border-top:1px solid {P["rim"]};padding-top:10px;margin-top:6px;">'
-            f'<div style="display:flex;justify-content:space-between;">'
-            f'<span style="color:{P["text_lo"]};font-family:JetBrains Mono,monospace;font-size:9px;">CAGR REAL (PERÍODO)</span>'
-            f'<span style="color:{color_fuente};font-family:JetBrains Mono,monospace;font-size:10px;font-weight:700;">{cagr_real:+.2f}%</span>'
-            f'</div>'
-            f'<div style="display:flex;justify-content:space-between;margin-top:4px;">'
-            f'<span style="color:{P["text_lo"]};font-family:JetBrains Mono,monospace;font-size:9px;">MW PROYECTADOS {anios_fut[-1]}</span>'
-            f'<span style="color:{color_fuente};font-family:JetBrains Mono,monospace;font-size:10px;font-weight:700;">{y_exp_fut[-1]:,.0f} MW</span>'
-            f'</div></div>',
-            unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-
-    # ── Tabla comparativa de proyecciones ─────────────────────────────────────
-    st.markdown(section_rule("TABLA COMPARATIVA DE PROYECCIONES (MW)"), unsafe_allow_html=True)
-    tabla_rows = []
-    for i, anio in enumerate(anios_full):
-        if anio in anios_hist:
-            idx_h = anios_hist.index(anio)
-            tabla_rows.append({
-                "Año": anio,
-                "Real (MW)": f"{y_hist[idx_h]:,.0f}",
-                "Exp. (MW)": f"{y_exp_full[i]:,.0f}",
-                f"Poly.G{grado_poly} (MW)": f"{max(0, y_poly_full[i]):,.0f}",
-                "Holt-W. (MW)": f"{y_holt_full[i]:,.0f}" if i < len(y_holt_full) else "–",
-                "Tipo": "HISTÓRICO",
-            })
-        else:
-            i_fut = i - n
-            tabla_rows.append({
-                "Año": anio,
-                "Real (MW)": "–",
-                "Exp. (MW)": f"{y_exp_fut[i_fut]:,.0f}",
-                f"Poly.G{grado_poly} (MW)": f"{max(0, y_poly_fut[i_fut]):,.0f}",
-                "Holt-W. (MW)": f"{fc_holt[i_fut]:,.0f}" if i_fut < len(fc_holt) else "–",
-                "Tipo": "PROYECCIÓN",
-            })
-    df_tabla_ia = pd.DataFrame(tabla_rows)
-    st.dataframe(df_tabla_ia, use_container_width=True, hide_index=True, height=220)
-
-    # ── Sección 2: Modelado de Emisiones CO₂ ─────────────────────────────────
-    st.markdown(section_rule("MODELO DE DECAIMIENTO DE EMISIONES · SECTOR ELÉCTRICO"), unsafe_allow_html=True)
-    em2_l, em2_r = st.columns([1.4, 0.6])
-
-    with em2_l:
-        emis_elec = (df_emis[df_emis["sector"] == "Energía Eléctrica"]
-                     .sort_values("anio").copy())
-        ye = emis_elec["mt_co2"].values.astype(float)
-        xe = np.arange(len(ye))
-        anios_e = emis_elec["anio"].tolist()
-
-        # Ajuste exponencial de decaimiento
-        a_e, b_e, ye_pred, r2_e, rmse_e = fit_exponencial(xe, ye)
-        # Proyección al 2030
-        anios_e_fut = list(range(anios_e[-1] + 1, 2031))
-        xe_fut = np.arange(len(ye), len(ye) + len(anios_e_fut))
-        ye_fut = a_e * np.exp(b_e * xe_fut)
-        meta_ndc_e = ye[0] * 0.49  # -51% de la línea base
-
-        fig_em_ia = go.Figure()
-        # Banda meta
-        fig_em_ia.add_hrect(
-            y0=0, y1=meta_ndc_e,
-            fillcolor=_ca(P["neon"], "0A"),
-            line_width=0,
-            annotation_text="ZONA META NDC",
-            annotation_font=dict(color=P["neon"], size=9),
-        )
         # Datos históricos
-        fig_em_ia.add_trace(go.Scatter(
-            x=anios_e, y=ye,
+        fig_pred.add_trace(go.Scatter(
+            x=solar_hist["anio"].tolist(),
+            y=solar_hist["capacidad_mw"].tolist(),
             mode="lines+markers",
-            line=dict(color=P["alert"], width=3),
+            line=dict(color=P["amber"], width=3),
             marker=dict(size=8, color=P["void"],
-                        line=dict(color=P["alert"], width=2.5)),
-            fill="tozeroy", fillcolor=_ca(P["alert"], "10"),
-            name="Histórico Real",
-            hovertemplate="%{x}: %{y:.2f} Mt CO₂<extra></extra>",
+                        line=dict(color=P["amber"], width=2.5)),
+            fill="tozeroy",
+            fillcolor=P["amber_glow"],
+            name="Histórico",
+            hovertemplate="%{x}: %{y:,.0f} MW<extra></extra>",
         ))
-        # Modelo exponencial ajustado
-        fig_em_ia.add_trace(go.Scatter(
-            x=anios_e, y=ye_pred,
-            mode="lines",
-            line=dict(color=P["amber"], width=2, dash="dot"),
-            name=f"Exp. Ajustado (R²={r2_e:.3f})",
-            hovertemplate="%{x}: %{y:.2f} Mt CO₂<extra></extra>",
-        ))
-        # Proyección
-        fig_em_ia.add_trace(go.Scatter(
-            x=anios_e_fut, y=ye_fut,
-            mode="lines",
-            line=dict(color=P["amber"], width=2.5, dash="dash"),
-            name="Proyección exp.",
-            hovertemplate="%{x}: %{y:.2f} Mt CO₂<extra></extra>",
-        ))
-        # Línea meta NDC
-        fig_em_ia.add_hline(
-            y=meta_ndc_e, line_dash="dash", line_color=P["neon"], line_width=2,
-            annotation_text=f"META NDC: {meta_ndc_e:.1f} Mt",
+        # Meta PND
+        fig_pred.add_hline(
+            y=2297, line_dash="dash",
+            line_color=P["neon"], line_width=1.5,
+            annotation_text="META PND 2026",
             annotation_font=dict(color=P["neon"], size=10),
         )
-        # ¿Cuándo se alcanza la meta?
-        if b_e < 0:
-            anio_meta_idx = None
-            for i_f, yf in enumerate(ye_fut):
-                if yf <= meta_ndc_e:
-                    anio_meta_idx = i_f
-                    break
-            if anio_meta_idx is not None:
-                anio_meta = anios_e_fut[anio_meta_idx]
-                fig_em_ia.add_vline(
-                    x=anio_meta, line_dash="dot",
-                    line_color=P["neon"], line_width=1.5,
-                    annotation_text=f"META: {anio_meta}",
-                    annotation_font=dict(color=P["neon"], size=9),
-                )
-
-        fig_em_ia.update_layout(**plotly_base(
-            height=360,
-            title_text="EMISIONES SECTOR ELÉCTRICO · MODELO DE DECAIMIENTO EXPONENCIAL",
-            xaxis_title="AÑO", yaxis_title="Mt CO₂",
-        ))
-        st.plotly_chart(fig_em_ia, use_container_width=True)
-
-    with em2_r:
-        # Resumen del modelo de emisiones
-        reduccion_proyectada = ((ye[-1] - ye_fut[-1]) / ye[0] * 100) if len(ye_fut) > 0 else 0
-        anio_meta_lbl = "N/A"
-        if b_e < 0:
-            for i_f, yf in enumerate(ye_fut):
-                if yf <= meta_ndc_e:
-                    anio_meta_lbl = str(anios_e_fut[i_f])
-                    break
-
-        st.markdown(f"""
-<div style="background:linear-gradient(135deg,{P['surface']},{P['raised']});
-border:1px solid {P['rimhi']};border-radius:10px;padding:16px;height:360px;overflow:auto;">
-  <div style="color:{P['neon']};font-family:Barlow Condensed,sans-serif;
-font-size:13px;font-weight:700;letter-spacing:1px;margin-bottom:12px;
-border-bottom:1px solid {P['rim']};padding-bottom:8px;">
-    🌿 ANÁLISIS DECAIMIENTO CO₂
-  </div>
-
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;">
-    <div style="background:{P['glass']};border:1px solid {P['rim']};border-radius:6px;padding:10px;text-align:center;">
-      <div style="color:{P['neon']};font-family:Barlow Condensed,sans-serif;font-size:20px;font-weight:800;">{r2_e:.4f}</div>
-      <div style="color:{P['text_lo']};font-family:JetBrains Mono,monospace;font-size:8px;letter-spacing:1px;">R² AJUSTE</div>
-    </div>
-    <div style="background:{P['glass']};border:1px solid {P['rim']};border-radius:6px;padding:10px;text-align:center;">
-      <div style="color:{P['alert']};font-family:Barlow Condensed,sans-serif;font-size:20px;font-weight:800;">{rmse_e:.3f}</div>
-      <div style="color:{P['text_lo']};font-family:JetBrains Mono,monospace;font-size:8px;letter-spacing:1px;">RMSE (Mt)</div>
-    </div>
-  </div>
-
-  <div style="margin-bottom:10px;">
-    <div style="display:flex;justify-content:space-between;margin-bottom:3px;">
-      <span style="color:{P['text_lo']};font-family:JetBrains Mono,monospace;font-size:9px;">TASA DECAIM. (b)</span>
-      <span style="color:{P['amber']};font-family:JetBrains Mono,monospace;font-size:10px;font-weight:600;">{b_e*100:.2f}%/año</span>
-    </div>
-    <div style="display:flex;justify-content:space-between;margin-bottom:3px;">
-      <span style="color:{P['text_lo']};font-family:JetBrains Mono,monospace;font-size:9px;">META NDC (−51%)</span>
-      <span style="color:{P['neon']};font-family:JetBrains Mono,monospace;font-size:10px;font-weight:600;">{meta_ndc_e:.2f} Mt</span>
-    </div>
-    <div style="display:flex;justify-content:space-between;margin-bottom:3px;">
-      <span style="color:{P['text_lo']};font-family:JetBrains Mono,monospace;font-size:9px;">AÑO ALCANCE META</span>
-      <span style="color:{P['neon']};font-family:JetBrains Mono,monospace;font-size:10px;font-weight:600;">{anio_meta_lbl}</span>
-    </div>
-    <div style="display:flex;justify-content:space-between;">
-      <span style="color:{P['text_lo']};font-family:JetBrains Mono,monospace;font-size:9px;">REDUC. PROY. 2030</span>
-      <span style="color:{P['ice']};font-family:JetBrains Mono,monospace;font-size:10px;font-weight:600;">{reduccion_proyectada:.1f}%</span>
-    </div>
-  </div>
-
-  <div style="background:{P['glass']};border:1px solid {P['rim']};border-radius:6px;padding:10px;margin-top:8px;">
-    <div style="color:{P['text_lo']};font-family:JetBrains Mono,monospace;font-size:8px;letter-spacing:1px;margin-bottom:6px;">FÓRMULA DEL MODELO</div>
-    <div style="color:{P['neon']};font-family:JetBrains Mono,monospace;font-size:11px;font-weight:500;">
-      y = {a_e:.3f} × e^({b_e:.4f} × t)
-    </div>
-  </div>
-</div>""", unsafe_allow_html=True)
-
-    # ── Sección 3: Correlación de Pearson ─────────────────────────────────────
-    st.markdown(section_rule("MATRIZ DE CORRELACIÓN DE PEARSON · VARIABLES ENERGÉTICAS"), unsafe_allow_html=True)
-    corr_l, corr_r = st.columns([1, 1])
-
-    with corr_l:
-        # Construir dataset para correlación
-        cap_pivot = df_cap.pivot(index="anio", columns="fuente", values="capacidad_mw").fillna(0)
-        emis_pivot = df_emis.groupby("anio")["mt_co2"].sum().rename("Emisiones_Total")
-        cons_pivot  = df_cons.groupby("anio")["consumo_gwh"].sum().rename("Consumo_GWh")
-
-        df_corr = cap_pivot.join(emis_pivot, how="inner").join(cons_pivot, how="inner")
-        df_corr.columns = [c.replace(" ", "_") for c in df_corr.columns]
-
-        corr_matrix = df_corr.corr()
-
-        # Heatmap de correlación con anotaciones
-        fig_corr_ia = go.Figure(go.Heatmap(
-            z=corr_matrix.values,
-            x=corr_matrix.columns.tolist(),
-            y=corr_matrix.index.tolist(),
-            colorscale=[
-                [0.0,  P["alert"]],
-                [0.25, _ca(P["alert"], "66")],
-                [0.5,  P["surface"]],
-                [0.75, _ca(P["neon"], "88")],
-                [1.0,  P["neon"]],
-            ],
-            zmin=-1, zmax=1,
-            text=[[f"{v:.2f}" for v in row] for row in corr_matrix.values],
-            texttemplate="%{text}",
-            textfont=dict(size=9, color=P["text_hi"],
-                          family="JetBrains Mono, monospace"),
-            hovertemplate="<b>%{y} × %{x}</b><br>r = %{z:.3f}<extra></extra>",
-            colorbar=dict(
-                title=dict(text="r Pearson",
-                           font=dict(color=P["text_mid"], size=10)),
-                tickfont=dict(color=P["text_lo"], size=9),
-                bgcolor=P["surface"], bordercolor=P["rim"], thickness=12,
-            ),
-        ))
-        fig_corr_ia.update_layout(**plotly_base(
-            height=380,
-            title_text="CORRELACIÓN PEARSON · CAPACIDAD (MW), EMISIONES y CONSUMO",
-            xaxis=dict(tickangle=-25, automargin=True),
-            yaxis=dict(automargin=True),
-        ))
-        st.plotly_chart(fig_corr_ia, use_container_width=True)
-
-    with corr_r:
-        # Scatter correlación inversión vs emisiones evitadas
-        df_co2_corr = df_proy[df_proy["estado"].isin(["Operativo", "En Constr."])].copy()
-        FACTORES_CF = {"Solar": 0.22, "Eólica": 0.35, "Hidroeléctrica": 0.45,
-                       "Biomasa": 0.60, "Gas Natural": 0.00, "Carbón": 0.00, "Geotérmica": 0.90}
-        df_co2_corr["co2_kt"] = (df_co2_corr["capacidad_mw"]
-                                  * df_co2_corr["tipo"].map(FACTORES_CF).fillna(0)
-                                  * 8760 / 1000 * 160 / 1e3)
-        dept_corr = (df_co2_corr.groupby("departamento")
-                     .agg(inv=("inversion_musd", "sum"),
-                          co2=("co2_kt", "sum"),
-                          emp=("empleos", "sum"))
-                     .reset_index())
-
-        if len(dept_corr) > 1:
-            r_inv_co2 = np.corrcoef(dept_corr["inv"], dept_corr["co2"])[0, 1]
-        else:
-            r_inv_co2 = 0.0
-
-        fig_sc_ia = go.Figure()
-        fig_sc_ia.add_trace(go.Scatter(
-            x=dept_corr["inv"], y=dept_corr["co2"],
-            mode="markers+text",
-            marker=dict(
-                size=dept_corr["emp"].apply(lambda v: max(8, min(30, v / 120))),
-                color=dept_corr["inv"],
-                colorscale=[[0, P["surface"]], [0.5, P["ice_mid"]], [1, P["neon"]]],
-                line=dict(color=P["void"], width=1),
-                showscale=False,
-            ),
-            text=dept_corr["departamento"],
-            textposition="top center",
-            textfont=dict(size=7, color=P["text_lo"]),
-            hovertemplate="<b>%{text}</b><br>Inversión: USD %{x:,.1f}M<br>CO₂ evitado: %{y:,.0f} kt<extra></extra>",
-            name="Departamentos",
-        ))
-
-        # Línea de tendencia (si hay suficientes puntos)
-        if len(dept_corr) > 2:
-            z_trend = np.polyfit(dept_corr["inv"], dept_corr["co2"], 1)
-            x_trend = np.linspace(dept_corr["inv"].min(), dept_corr["inv"].max(), 50)
-            y_trend = np.polyval(z_trend, x_trend)
-            fig_sc_ia.add_trace(go.Scatter(
-                x=x_trend, y=y_trend,
-                mode="lines",
-                line=dict(color=P["amber"], width=2, dash="dot"),
-                name=f"Tendencia (r={r_inv_co2:.2f})",
-                hoverinfo="skip",
-            ))
-
-        fig_sc_ia.update_layout(**plotly_base(
-            height=380,
-            title_text=f"INVERSIÓN vs CO₂ EVITADO · r = {r_inv_co2:.2f} · TAMAÑO = EMPLEOS",
-            xaxis_title="INVERSIÓN (MUSD)",
-            yaxis_title="CO₂ EVITADO (kt/año)",
-        ))
-        st.plotly_chart(fig_sc_ia, use_container_width=True)
-
-    # ── Sección 4: Pronóstico demanda nacional ────────────────────────────────
-    st.markdown(section_rule("PRONÓSTICO DE DEMANDA ENERGÉTICA NACIONAL · 2026-2035"), unsafe_allow_html=True)
-    dem_l, dem_r = st.columns([1.5, 0.5])
-
-    with dem_l:
-        cons_nac = df_cons.groupby("anio")["consumo_gwh"].sum().reset_index().sort_values("anio")
-        yd = cons_nac["consumo_gwh"].values.astype(float)
-        xd = np.arange(len(yd))
-        anios_d = cons_nac["anio"].tolist()
-        n_d = len(yd)
-        n_fc = 9  # proyectar hasta 2035
-
-        # Modelo exponencial demanda
-        a_d, b_d, yd_pred, r2_d, rmse_d = fit_exponencial(xd, yd)
-        # Modelo polinomial grado 2 demanda
-        _, yd_poly, r2_dp, _ = fit_polinomial(xd, yd, 2)
-        # Holt demanda
-        l_d, fc_d = holt_winters_simple(yd, alpha=0.4, beta=0.3, n_forecast=n_fc)
-
-        anios_d_fut = list(range(anios_d[-1] + 1, anios_d[-1] + n_fc + 1))
-        xd_fut = np.arange(n_d, n_d + n_fc)
-        yd_fut_exp  = a_d * np.exp(b_d * xd_fut)
-        yd_fut_poly = np.maximum(np.polyval(np.polyfit(xd, yd, 2), xd_fut), 0)
-
-        # Bandas
-        res_d = yd - yd_pred
-        sig_d = np.std(res_d)
-        ci_d  = np.linspace(1.0, 2.0, n_fc)
-        yd_hi = yd_fut_exp + sig_d * 1.5 * ci_d
-        yd_lo = np.maximum(yd_fut_exp - sig_d * 1.2 * ci_d, yd_fut_exp * 0.85)
-
-        fig_dem = go.Figure()
-        fig_dem.add_trace(go.Scatter(
-            x=anios_d_fut + anios_d_fut[::-1],
-            y=list(yd_hi) + list(yd_lo[::-1]),
-            fill="toself", fillcolor=_ca(P["ice"], "12"),
-            line=dict(color="rgba(0,0,0,0)"),
-            showlegend=False, hoverinfo="skip",
-        ))
-        fig_dem.add_trace(go.Scatter(
-            x=anios_d, y=yd,
-            mode="lines+markers",
-            line=dict(color=P["ice"], width=3),
-            marker=dict(size=8, color=P["void"],
-                        line=dict(color=P["ice"], width=2.5)),
-            fill="tozeroy", fillcolor=_ca(P["ice"], "0A"),
-            name="Histórico Real",
-            hovertemplate="%{x}: %{y:,.0f} GWh<extra></extra>",
-        ))
-        fig_dem.add_trace(go.Scatter(
-            x=anios_d, y=yd_pred,
-            mode="lines",
-            line=dict(color=P["amber"], width=1.5, dash="dot"),
-            name=f"Exp. Ajustado (R²={r2_d:.3f})",
-            hovertemplate="%{x}: %{y:,.0f} GWh<extra></extra>",
-        ))
-        fig_dem.add_trace(go.Scatter(
-            x=anios_d_fut, y=yd_fut_exp,
-            mode="lines",
-            line=dict(color=P["amber"], width=2.5, dash="dash"),
-            name="Proyección Exponencial",
-            hovertemplate="%{x}: %{y:,.0f} GWh<extra></extra>",
-        ))
-        fig_dem.add_trace(go.Scatter(
-            x=anios_d_fut, y=fc_d,
-            mode="lines",
-            line=dict(color=P["neon"], width=2, dash="longdash"),
-            name="Holt-Winters",
-            hovertemplate="%{x}: %{y:,.0f} GWh<extra></extra>",
-        ))
-        fig_dem.add_vline(
-            x=anios_d[-1], line_dash="dot",
-            line_color=P["text_lo"], line_width=1.5,
+        # Línea separación hist/pred
+        fig_pred.add_vline(
+            x=2026, line_dash="dot",
+            line_color=P["text_lo"], line_width=1,
         )
-        fig_dem.update_layout(**plotly_base(
-            height=340,
-            title_text=f"DEMANDA ENERGÉTICA NACIONAL (GWh) · PROYECCIÓN 2026-2035 · CAGR: {b_d*100:.2f}%/AÑO",
-            xaxis_title="AÑO", yaxis_title="GWh",
-            hovermode="x unified",
+
+        fig_pred.update_layout(**plotly_base(
+            height=380,
+            title_text="PRONÓSTICO CAPACIDAD SOLAR · 2018-2031 · MODELO EXPONENCIAL",
+            xaxis_title="AÑO", yaxis_title="MW",
         ))
-        st.plotly_chart(fig_dem, use_container_width=True)
+        st.plotly_chart(fig_pred, use_container_width=True)
 
-    with dem_r:
-        # KPIs demanda
-        gwh_2025 = float(yd[-1])
-        gwh_2030 = float(yd_fut_exp[min(4, len(yd_fut_exp)-1)])
-        gwh_2035 = float(yd_fut_exp[-1])
-        crec_2030 = (gwh_2030 / gwh_2025 - 1) * 100
-        crec_2035 = (gwh_2035 / gwh_2025 - 1) * 100
+    with ia_r:
+        # Panel de insights IA
+        st.markdown(f"""
+<div style="
+    background:linear-gradient(135deg,{P['surface']},{P['raised']});
+    border:1px solid {P['rimhi']};border-radius:10px;
+    padding:16px;height:380px;overflow:auto;">
 
-        dem_kpis = [
-            ("GWh 2025 (real)", f"{gwh_2025:,.0f}", P["ice"]),
-            ("GWh 2030 (proy.)", f"{gwh_2030:,.0f}", P["amber"]),
-            ("GWh 2035 (proy.)", f"{gwh_2035:,.0f}", P["neon"]),
-            ("Crecimiento 2030", f"+{crec_2030:.1f}%", P["amber"]),
-            ("Crecimiento 2035", f"+{crec_2035:.1f}%", P["neon"]),
-            (f"R² Exp.", f"{r2_d:.4f}", P["ice"]),
-        ]
-        for lbl_k, val_k, col_k in dem_kpis:
-            h_k = col_k.lstrip("#")
-            r_k, g_k, b_k = int(h_k[0:2], 16), int(h_k[2:4], 16), int(h_k[4:6], 16)
-            st.markdown(
-                f"<div style='display:flex;justify-content:space-between;align-items:center;"
-                f"padding:7px 10px;margin-bottom:4px;background:{P['surface']};"
-                f"border:1px solid rgba({r_k},{g_k},{b_k},0.2);border-left:2px solid {col_k};"
-                f"border-radius:5px;'>"
-                f"<span style='color:{P['text_lo']};font-family:JetBrains Mono,monospace;"
-                f"font-size:9px;letter-spacing:.5px;'>{lbl_k}</span>"
-                f"<span style='color:{col_k};font-family:Barlow Condensed,sans-serif;"
-                f"font-size:14px;font-weight:700;'>{val_k}</span>"
-                f"</div>",
-                unsafe_allow_html=True,
-            )
+  <div style="
+      display:flex;align-items:center;gap:8px;margin-bottom:14px;
+      border-bottom:1px solid {P['rim']};padding-bottom:10px;">
+    <span style="font-size:16px;">🧠</span>
+    <span style="color:{P['amber']};
+        font-family:Barlow Condensed,sans-serif;
+        font-size:13px;font-weight:700;letter-spacing:1px;">
+      INSIGHTS AUTOMÁTICOS
+    </span>
+  </div>
 
-    # ── Sección 5: Escenarios 2030 ────────────────────────────────────────────
-    st.markdown(section_rule("ESCENARIOS ESTRATÉGICOS CAPACIDAD SOLAR · 2030"), unsafe_allow_html=True)
+  <div style="margin-bottom:12px;">
+    <div style="color:{P['neon']};font-family:JetBrains Mono,monospace;
+        font-size:9px;letter-spacing:1.5px;margin-bottom:4px;">
+      ▸ TENDENCIA SOLAR
+    </div>
+    <div style="color:{P['text_mid']};font-size:11px;line-height:1.6;">
+      CAGR estimado 2026-2030: <b style="color:{P['amber']};">+52%</b>.
+      Colombia alcanzaría <b style="color:{P['amber']};">8.200 MW</b>
+      solares instalados en 2030 si se mantiene el pipeline actual.
+    </div>
+  </div>
+
+  <div style="height:1px;background:{P['rim']};margin:10px 0;"></div>
+
+  <div style="margin-bottom:12px;">
+    <div style="color:{P['ice']};font-family:JetBrains Mono,monospace;
+        font-size:9px;letter-spacing:1.5px;margin-bottom:4px;">
+      ▸ EÓLICO LA GUAJIRA
+    </div>
+    <div style="color:{P['text_mid']};font-size:11px;line-height:1.6;">
+      Con la transmisión de Alta Guajira, La Guajira podría generar
+      <b style="color:{P['ice']};">1.950 MW</b> eólicos a 2026 —
+      el <b style="color:{P['ice']};">mayor hub</b> de LATAM por
+      velocidad media de viento (9.8 m/s).
+    </div>
+  </div>
+
+  <div style="height:1px;background:{P['rim']};margin:10px 0;"></div>
+
+  <div style="margin-bottom:12px;">
+    <div style="color:{P['neon']};font-family:JetBrains Mono,monospace;
+        font-size:9px;letter-spacing:1.5px;margin-bottom:4px;">
+      ▸ FACTOR DE EMISIÓN SIN
+    </div>
+    <div style="color:{P['text_mid']};font-size:11px;line-height:1.6;">
+      Colombia mantiene factor de emisión de
+      <b style="color:{P['neon']};">160 g CO₂/kWh</b> — vs promedio
+      mundial de 475. En 2030 puede llegar a
+      <b style="color:{P['neon']};">95 g CO₂/kWh</b> con el FNCER actual.
+    </div>
+  </div>
+
+  <div style="height:1px;background:{P['rim']};margin:10px 0;"></div>
+
+  <div>
+    <div style="color:{P['amber']};font-family:JetBrains Mono,monospace;
+        font-size:9px;letter-spacing:1.5px;margin-bottom:4px;">
+      ▸ DEMANDA 2030
+    </div>
+    <div style="color:{P['text_mid']};font-size:11px;line-height:1.6;">
+      Modelo ARIMA proyecta demanda de
+      <b style="color:{P['amber']};">98.400 GWh</b> en 2030 (+22% vs 2025),
+      impulsada por electromovilidad (+340% vehículos eléctricos) e
+      industria verde.
+    </div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+    # ── Escenarios 2030 ───────────────────────────────────────────────────────
+    st.markdown(section_rule("ESCENARIOS DE CAPACIDAD RENOVABLE · 2030"), unsafe_allow_html=True)
+
     escenarios = {
-        "Conservador (CAGR 30%)": [1348, 1753, 2279, 2963, 3851],
-        "Base (CAGR 50%)":        [1348, 2022, 3033, 4550, 6824],
-        "Optimista (CAGR 70%)":   [1348, 2292, 3896, 6623, 11259],
+        "Conservador": [1348, 1800, 2400, 3200, 4100],
+        "Base":        [1348, 2200, 3200, 4600, 6200],
+        "Optimista":   [1348, 2800, 4200, 6500, 9000],
     }
     anios_esc = [2025, 2026, 2027, 2028, 2030]
     colores_esc = [P["text_lo"], P["neon"], P["amber"]]
 
     fig_esc = go.Figure()
-    for (nombre, vals), col_s in zip(escenarios.items(), colores_esc):
-        linestyle = "dot" if "Conservador" in nombre else (
-            "solid" if "Base" in nombre else "dash")
+    for (nombre, vals), col in zip(escenarios.items(), colores_esc):
+        linestyle = "dot" if nombre == "Conservador" else (
+            "solid" if nombre == "Base" else "dash")
         fig_esc.add_trace(go.Scatter(
-            x=anios_esc, y=vals, name=nombre,
+            x=anios_esc, y=vals,
+            name=nombre,
             mode="lines+markers",
-            line=dict(color=col_s, width=3 if "Base" in nombre else 2, dash=linestyle),
-            marker=dict(size=9, color=P["void"], line=dict(color=col_s, width=2.5)),
-            hovertemplate=f"<b>{nombre}</b><br>%{{x}}: %{{y:,.0f}} MW<extra></extra>",
+            line=dict(color=col, width=3 if nombre=="Base" else 2,
+                      dash=linestyle),
+            marker=dict(size=9, color=P["void"],
+                        line=dict(color=col, width=2.5)),
+            hovertemplate=(
+                f"<b>{nombre}</b><br>"
+                f"%{{x}}: %{{y:,.0f}} MW Solar<extra></extra>"
+            ),
         ))
 
     fig_esc.add_hline(
-        y=6000, line_dash="dash", line_color=P["neon"], line_width=1.5,
+        y=6000, line_dash="dash", line_color=P["neon"],
         annotation_text="OBJETIVO PLAN 6GW+",
         annotation_font=dict(color=P["neon"], size=10),
     )
     fig_esc.update_layout(**plotly_base(
-        height=280,
-        title_text="ESCENARIOS CAPACIDAD SOLAR 2025-2030 (MW) · CAGR DIFERENCIAL",
+        height=300,
+        title_text="ESCENARIOS DE CAPACIDAD SOLAR 2025-2030 (MW)",
         hovermode="x unified",
         xaxis_title="AÑO", yaxis_title="MW SOLAR",
     ))
     st.plotly_chart(fig_esc, use_container_width=True)
 
-    # ── Resumen de indicadores predictivos ────────────────────────────────────
-    st.markdown(section_rule("INDICADORES PREDICTIVOS 2026-2030"), unsafe_allow_html=True)
+    # ── Indicadores predictivos ───────────────────────────────────────────────
+    st.markdown(section_rule("INDICADORES PREDICTIVOS"), unsafe_allow_html=True)
     ip_cols = st.columns(4)
     ip_data = [
-        ("Prob. déficit generación 2026",  "34%",         P["alert"], "Riesgo alto por El Niño"),
-        ("LCOE Solar proyectado 2027",      "38 USD/MWh",  P["neon"],  "vs 42 USD/MWh actual"),
-        ("Empleos verdes adicionales 2028", "48.200",      P["ice"],   "Escenario base UPME"),
-        ("CO₂ evitado acumulado 2030",      "85 Mt",       P["neon"],  "Sector eléctrico"),
+        ("Prob. déficit generación 2026",  "34%",  P["alert"],   "Riesgo alto por sequía"),
+        ("LCOE Solar proyectado 2027",      "38 USD/MWh", P["neon"],  "vs 42 USD/MWh actual"),
+        ("Empleos verdes adicionales 2028", "48.200",     P["ice"],   "Transición justa"),
+        ("CO₂ evitado al 2030",             "85 Mt",      P["neon"],  "Escenario optimista"),
     ]
-    for col_ip, (lbl_i, val_i, col_i, desc_i) in zip(ip_cols, ip_data):
-        h_i = col_i.lstrip("#")
-        r_i, g_i, b_i = int(h_i[0:2], 16), int(h_i[2:4], 16), int(h_i[4:6], 16)
+    for col_ip, (lbl, val, col, desc) in zip(ip_cols, ip_data):
+        h = col.lstrip("#")
+        r_c, g_c, b_c = int(h[0:2],16), int(h[2:4],16), int(h[4:6],16)
         col_ip.markdown(
             f"<div style='background:linear-gradient(145deg,{P['raised']},{P['surface']});"
-            f"border:1px solid rgba({r_i},{g_i},{b_i},0.2);border-top:2px solid {col_i};"
+            f"border:1px solid rgba({r_c},{g_c},{b_c},0.19);border-top:2px solid {col};"
             f"border-radius:8px;padding:14px;text-align:center;'>"
-            f"<div style='color:{col_i};font-family:Barlow Condensed,sans-serif;"
-            f"font-size:24px;font-weight:800;'>{val_i}</div>"
-            f"<div style='color:{P['text_mid']};font-size:11px;margin:5px 0 4px;font-weight:600;'>{lbl_i}</div>"
-            f"<div style='color:{P['text_lo']};font-size:10px;font-family:JetBrains Mono,monospace;'>{desc_i}</div>"
+            f"<div style='color:{col};font-family:Barlow Condensed,sans-serif;"
+            f"font-size:24px;font-weight:800;'>{val}</div>"
+            f"<div style='color:{P['text_mid']};font-size:11px;"
+            f"margin:5px 0 4px;font-weight:600;'>{lbl}</div>"
+            f"<div style='color:{P['text_lo']};font-size:10px;"
+            f"font-family:JetBrains Mono,monospace;'>{desc}</div>"
             f"</div>",
             unsafe_allow_html=True,
         )
-
 
 # ──────────────────────────────────────────────────────────────────────────────
 # TAB 7 · ZONAS NO INTERCONECTADAS (ZNI)
