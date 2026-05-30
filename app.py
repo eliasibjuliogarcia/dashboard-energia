@@ -2281,57 +2281,45 @@ with tabs[6]:
         st.plotly_chart(fig_ia, use_container_width=True)
 
     with ia_g2:
-        # Panel de métricas de modelos
+        # Panel de métricas — todo en un solo bloque HTML para evitar div abiertos sin cerrar
         cagr_real = ((y_hist[-1] / y_hist[0]) ** (1 / (n - 1)) - 1) * 100 if n > 1 else 0.0
         r2_holt   = 1 - np.sum((y_hist - l_holt) ** 2) / max(np.sum((y_hist - np.mean(y_hist)) ** 2), 1e-9)
         rmse_holt = float(np.sqrt(np.mean((y_hist - l_holt) ** 2)))
 
         metricas = [
             ("Regresión Exponencial", r2_exp,  rmse_exp,  color_fuente, b_exp * 100),
-            (f"Polinomial Grado {grado_poly}",  r2_poly, rmse_poly, P["ice"],    None),
-            ("Holt-Winters",          r2_holt, rmse_holt, P["amber"],  None),
+            (f"Polinomial Grado {grado_poly}", r2_poly, rmse_poly, P["ice"],   None),
+            ("Holt-Winters",          r2_holt, rmse_holt, P["amber"], None),
         ]
 
-        st.markdown(
-            f'<div style="background:linear-gradient(135deg,{P["surface"]},{P["raised"]});'
-            f'border:1px solid {P["rimhi"]};border-radius:10px;padding:16px;height:400px;overflow:auto;">',
-            unsafe_allow_html=True)
-        st.markdown(
-            f'<div style="color:{P["amber"]};font-family:Barlow Condensed,sans-serif;'
-            f'font-size:13px;font-weight:700;letter-spacing:1px;margin-bottom:12px;'
-            f'border-bottom:1px solid {P["rim"]};padding-bottom:8px;">'
-            f'📊 MÉTRICAS DE MODELOS</div>',
-            unsafe_allow_html=True)
-
-        for nombre, r2, rmse_v, col, cagr_m in metricas:
-            r2_pct  = max(0, min(r2 * 100, 100))
-            r2_col  = P["neon"] if r2 > 0.92 else (P["amber"] if r2 > 0.75 else P["alert"])
-            extra   = ""
+        def _metrica_html(nombre, r2, rmse_v, col, cagr_m):
+            r2_pct = max(0, min(r2 * 100, 100))
+            r2_col = P["neon"] if r2 > 0.92 else (P["amber"] if r2 > 0.75 else P["alert"])
+            cagr_html = ""
             if cagr_m is not None:
-                extra = (f'<span style="color:{P["text_lo"]};font-size:9px;'
-                         f'font-family:JetBrains Mono,monospace;"> · CAGR: '
-                         f'<span style="color:{col};">{cagr_m:+.1f}%</span></span>')
-            st.markdown(f"""
-<div style="margin-bottom:14px;">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
-    <span style="color:{P['text_mid']};font-size:11px;font-weight:600;">{nombre}</span>
-    {extra}
-  </div>
-  <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
-    <span style="color:{P['text_lo']};font-family:JetBrains Mono,monospace;font-size:9px;">R² · BONDAD DE AJUSTE</span>
-    <span style="color:{r2_col};font-family:JetBrains Mono,monospace;font-size:10px;font-weight:600;">{r2:.4f}</span>
-  </div>
-  <div style="background:{P['surface']};border-radius:3px;height:4px;overflow:hidden;border:1px solid {P['rim']};margin-bottom:6px;">
-    <div style="width:{r2_pct:.1f}%;height:100%;background:linear-gradient(90deg,{_ca(r2_col,'66')},{r2_col});border-radius:3px;"></div>
-  </div>
-  <div style="display:flex;justify-content:space-between;">
-    <span style="color:{P['text_lo']};font-family:JetBrains Mono,monospace;font-size:9px;">RMSE (MW)</span>
-    <span style="color:{P['text_lo']};font-family:JetBrains Mono,monospace;font-size:9px;font-weight:500;">{rmse_v:,.1f}</span>
-  </div>
-</div>""", unsafe_allow_html=True)
+                cagr_html = (f'<span style="color:{P["text_lo"]};font-size:9px;'
+                             f'font-family:JetBrains Mono,monospace;"> · CAGR: '
+                             f'<span style="color:{col};">{cagr_m:+.1f}%</span></span>')
+            return (
+                f'<div style="margin-bottom:14px;">'
+                f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">'
+                f'<span style="color:{P["text_mid"]};font-size:11px;font-weight:600;">{nombre}</span>'
+                f'{cagr_html}</div>'
+                f'<div style="display:flex;justify-content:space-between;margin-bottom:4px;">'
+                f'<span style="color:{P["text_lo"]};font-family:JetBrains Mono,monospace;font-size:9px;">R² · BONDAD DE AJUSTE</span>'
+                f'<span style="color:{r2_col};font-family:JetBrains Mono,monospace;font-size:10px;font-weight:600;">{r2:.4f}</span>'
+                f'</div>'
+                f'<div style="background:{P["surface"]};border-radius:3px;height:4px;overflow:hidden;border:1px solid {P["rim"]};margin-bottom:6px;">'
+                f'<div style="width:{r2_pct:.1f}%;height:100%;background:linear-gradient(90deg,{_ca(r2_col,"66")},{r2_col});border-radius:3px;"></div>'
+                f'</div>'
+                f'<div style="display:flex;justify-content:space-between;">'
+                f'<span style="color:{P["text_lo"]};font-family:JetBrains Mono,monospace;font-size:9px;">RMSE (MW)</span>'
+                f'<span style="color:{P["text_lo"]};font-family:JetBrains Mono,monospace;font-size:9px;font-weight:500;">{rmse_v:,.1f}</span>'
+                f'</div></div>'
+            )
 
-        # CAGR real
-        st.markdown(
+        metricas_html = "".join(_metrica_html(*m) for m in metricas)
+        footer_html = (
             f'<div style="border-top:1px solid {P["rim"]};padding-top:10px;margin-top:6px;">'
             f'<div style="display:flex;justify-content:space-between;">'
             f'<span style="color:{P["text_lo"]};font-family:JetBrains Mono,monospace;font-size:9px;">CAGR REAL (PERÍODO)</span>'
@@ -2340,36 +2328,89 @@ with tabs[6]:
             f'<div style="display:flex;justify-content:space-between;margin-top:4px;">'
             f'<span style="color:{P["text_lo"]};font-family:JetBrains Mono,monospace;font-size:9px;">MW PROYECTADOS {anios_fut[-1]}</span>'
             f'<span style="color:{color_fuente};font-family:JetBrains Mono,monospace;font-size:10px;font-weight:700;">{y_exp_fut[-1]:,.0f} MW</span>'
-            f'</div></div>',
-            unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
+            f'</div></div>'
+        )
+        st.markdown(
+            f'<div style="background:linear-gradient(135deg,{P["surface"]},{P["raised"]});'
+            f'border:1px solid {P["rimhi"]};border-radius:10px;padding:16px;height:400px;overflow:auto;">'
+            f'<div style="color:{P["amber"]};font-family:Barlow Condensed,sans-serif;'
+            f'font-size:13px;font-weight:700;letter-spacing:1px;margin-bottom:12px;'
+            f'border-bottom:1px solid {P["rim"]};padding-bottom:8px;">📊 MÉTRICAS DE MODELOS</div>'
+            f'{metricas_html}{footer_html}</div>',
+            unsafe_allow_html=True,
+        )
 
-    # ── Tabla comparativa de proyecciones ─────────────────────────────────────
+    # ── Tabla comparativa de proyecciones — HTML estilizado (st.dataframe ignora el tema oscuro) ──
     st.markdown(section_rule("TABLA COMPARATIVA DE PROYECCIONES (MW)"), unsafe_allow_html=True)
+
     tabla_rows = []
     for i, anio in enumerate(anios_full):
         if anio in anios_hist:
             idx_h = anios_hist.index(anio)
             tabla_rows.append({
-                "Año": anio,
-                "Real (MW)": f"{y_hist[idx_h]:,.0f}",
-                "Exp. (MW)": f"{y_exp_full[i]:,.0f}",
-                f"Poly.G{grado_poly} (MW)": f"{max(0, y_poly_full[i]):,.0f}",
-                "Holt-W. (MW)": f"{y_holt_full[i]:,.0f}" if i < len(y_holt_full) else "–",
-                "Tipo": "HISTÓRICO",
+                "anio": anio,
+                "real": f"{y_hist[idx_h]:,.0f}",
+                "exp":  f"{y_exp_full[i]:,.0f}",
+                "poly": f"{max(0, y_poly_full[i]):,.0f}",
+                "holt": f"{y_holt_full[i]:,.0f}" if i < len(y_holt_full) else "–",
+                "tipo": "HISTÓRICO",
             })
         else:
             i_fut = i - n
             tabla_rows.append({
-                "Año": anio,
-                "Real (MW)": "–",
-                "Exp. (MW)": f"{y_exp_fut[i_fut]:,.0f}",
-                f"Poly.G{grado_poly} (MW)": f"{max(0, y_poly_fut[i_fut]):,.0f}",
-                "Holt-W. (MW)": f"{fc_holt[i_fut]:,.0f}" if i_fut < len(fc_holt) else "–",
-                "Tipo": "PROYECCIÓN",
+                "anio": anio,
+                "real": "–",
+                "exp":  f"{y_exp_fut[i_fut]:,.0f}",
+                "poly": f"{max(0, y_poly_fut[i_fut]):,.0f}",
+                "holt": f"{fc_holt[i_fut]:,.0f}" if i_fut < len(fc_holt) else "–",
+                "tipo": "PROYECCIÓN",
             })
-    df_tabla_ia = pd.DataFrame(tabla_rows)
-    st.dataframe(df_tabla_ia, use_container_width=True, hide_index=True, height=220)
+
+    col_labels = ["Año", "Real (MW)", "Exp. (MW)", f"Poly.G{grado_poly} (MW)", "Holt-W. (MW)", "Tipo"]
+    row_keys   = ["anio", "real", "exp", "poly", "holt", "tipo"]
+
+    header_cells = "".join(
+        f'<th style="padding:8px 12px;text-align:{"right" if i>0 and i<5 else "left"};'
+        f'color:{P["text_mid"]};font-family:JetBrains Mono,monospace;font-size:9px;'
+        f'letter-spacing:1.5px;text-transform:uppercase;border-bottom:2px solid {P["rimhi"]};'
+        f'background:{P["raised"]};">{lbl}</th>'
+        for i, lbl in enumerate(col_labels)
+    )
+
+    def _tipo_badge(tipo):
+        col = P["neon"] if tipo == "HISTÓRICO" else P["amber"]
+        return (f'<span style="background:{_ca(col,"18")};color:{col};border:1px solid {_ca(col,"44")};'
+                f'border-radius:3px;padding:2px 7px;font-size:9px;font-family:JetBrains Mono,monospace;'
+                f'letter-spacing:1px;">{tipo}</span>')
+
+    body_rows_html = ""
+    for k, row in enumerate(tabla_rows):
+        bg = P["raised"] if k % 2 == 0 else P["surface"]
+        cells = ""
+        for j, key in enumerate(row_keys):
+            val = row[key]
+            align = "right" if j > 0 and j < 5 else "left"
+            if key == "tipo":
+                content = _tipo_badge(val)
+            elif key == "anio":
+                content = f'<span style="color:{P["text_hi"]};font-family:JetBrains Mono,monospace;font-size:11px;font-weight:600;">{val}</span>'
+            elif val == "–":
+                content = f'<span style="color:{P["text_mute"]};font-family:JetBrains Mono,monospace;font-size:11px;">–</span>'
+            else:
+                num_col = color_fuente if key == "exp" else (P["ice"] if key == "poly" else (P["amber"] if key == "holt" else P["text_mid"]))
+                content = f'<span style="color:{num_col};font-family:JetBrains Mono,monospace;font-size:11px;">{val}</span>'
+            cells += (f'<td style="padding:7px 12px;text-align:{align};'
+                      f'border-bottom:1px solid {P["grid"]};background:{bg};">{content}</td>')
+        body_rows_html += f"<tr>{cells}</tr>"
+
+    tabla_html = (
+        f'<div style="overflow-x:auto;border:1px solid {P["rim"]};border-radius:8px;margin-bottom:8px;">'
+        f'<table style="width:100%;border-collapse:collapse;background:{P["surface"]};">'
+        f'<thead><tr>{header_cells}</tr></thead>'
+        f'<tbody>{body_rows_html}</tbody>'
+        f'</table></div>'
+    )
+    st.markdown(tabla_html, unsafe_allow_html=True)
 
     # ── Sección 2: Modelado de Emisiones CO₂ ─────────────────────────────────
     st.markdown(section_rule("MODELO DE DECAIMIENTO DE EMISIONES · SECTOR ELÉCTRICO"), unsafe_allow_html=True)
