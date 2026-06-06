@@ -2812,7 +2812,7 @@ border-bottom:1px solid {P['rim']};padding-bottom:8px;">
     st.markdown(section_rule("INDICADORES PREDICTIVOS 2026-2030"), unsafe_allow_html=True)
     ip_cols = st.columns(4)
     ip_data = [
-        ("Prob. déficit generación 2026",  "34%",         P["alert"], "Riesgo alto por El Niño"),
+        ("Déficit de energía firme en 2026",  "-2.3%",     P["alert"], "Riesgo alto por El Niño"),
         ("LCOE Solar proyectado 2027",      "38 USD/MWh",  P["neon"],  "vs 42 USD/MWh actual"),
         ("Empleos verdes adicionales 2028", "48.200",      P["ice"],   "Escenario base UPME"),
         ("CO₂ evitado acumulado 2030",      "85 Mt",       P["neon"],  "Sector eléctrico"),
